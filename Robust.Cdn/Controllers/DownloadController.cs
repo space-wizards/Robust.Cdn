@@ -1,5 +1,6 @@
 ﻿using System.Buffers.Binary;
 using System.Collections;
+using System.Diagnostics;
 using Dapper;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
@@ -176,10 +177,13 @@ public sealed class DownloadController : ControllerBase
             stmt.BindInt64(1, versionId); // @VersionId
 
             offset = 0;
+            var swSqlite = new Stopwatch();
+            var count = 0;
             while (offset < buf.Length)
             {
                 var index = BinaryPrimitives.ReadInt32LittleEndian(buf.Slice(offset, 4).Span);
 
+                swSqlite.Start();
                 stmt.BindInt(2, index);
 
                 if (stmt.Step() != raw.SQLITE_ROW)
@@ -190,6 +194,7 @@ public sealed class DownloadController : ControllerBase
                 var rowId = stmt.ColumnInt64(2);
 
                 stmt.Reset();
+                swSqlite.Stop();
 
                 // _aczSawmill.Debug($"{index:D5}: {blobLength:D8} {dataOffset:D8} {dataLength:D8}");
 
@@ -212,7 +217,13 @@ public sealed class DownloadController : ControllerBase
                 await blob.CopyToAsync(outStream);
 
                 offset += 4;
+                count += 1;
             }
+
+            _logger.LogTrace(
+                "Total SQLite: {SqliteElapsed} ms, ns / iter: {NanosPerIter}",
+                swSqlite.ElapsedMilliseconds,
+                swSqlite.Elapsed.TotalMilliseconds * 1_000_000 / count);
         }
 
         return new NoOpActionResult();
