@@ -142,6 +142,7 @@ public sealed class DownloadController : ControllerBase
                 options.StreamCompressionLevel);
 
             outStream = zStdCompressStream;
+            Response.Headers.ContentEncoding = "zstd";
         }
 
         var preCompressed = true;
