@@ -1,4 +1,4 @@
-﻿namespace SS14.Cdn;
+﻿namespace Robust.Cdn;
 
 public enum ContentCompression
 {

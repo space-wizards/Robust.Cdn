@@ -4,6 +4,6 @@ obj/
 riderModule.iml
 /_ReSharper.Caches/
 
-SS14.Cdn/content.db*
+Robust.Cdn/content.db*
 *.user
 testData/

@@ -1,8 +1,8 @@
 using Dapper;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
-using SS14.Cdn;
-using SS14.Cdn.Services;
+using Robust.Cdn;
+using Robust.Cdn.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -29,7 +29,7 @@ app.Lifetime.ApplicationStopped.Register(SqliteConnection.ClearAllPools);
     using var initScope = app.Services.CreateScope();
     var services = initScope.ServiceProvider;
     var logFactory = services.GetRequiredService<ILoggerFactory>();
-    var loggerStartup = logFactory.CreateLogger("SS14.Cdn.Program");
+    var loggerStartup = logFactory.CreateLogger("Robust.Cdn.Program");
     var options = services.GetRequiredService<IOptions<CdnOptions>>().Value;
     var db = services.GetRequiredService<Database>().Connection;
 
@@ -46,7 +46,7 @@ app.Lifetime.ApplicationStopped.Register(SqliteConnection.ClearAllPools);
     loggerStartup.LogDebug("Running migrations!");
     var loggerMigrator = logFactory.CreateLogger<Migrator>();
 
-    Migrator.Migrate(loggerMigrator, db, "SS14.Cdn.Migrations");
+    Migrator.Migrate(loggerMigrator, db, "Robust.Cdn.Migrations");
     loggerStartup.LogDebug("Done running migrations!");
 
 }

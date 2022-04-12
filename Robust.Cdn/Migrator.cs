@@ -2,7 +2,7 @@
 using Dapper;
 using Microsoft.Data.Sqlite;
 
-namespace SS14.Cdn;
+namespace Robust.Cdn;
 
 /// <summary>
 /// Utility class to do SQLite database migrations.

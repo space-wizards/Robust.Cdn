@@ -1,6 +1,6 @@
 ﻿using System.Buffers;
 
-namespace SS14.Cdn.Helpers;
+namespace Robust.Cdn.Helpers;
 
 /// <summary>
 /// Helpers for dealing with buffer-like arrays.

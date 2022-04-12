@@ -2,7 +2,7 @@
 using SQLitePCL;
 using static SQLitePCL.raw;
 
-namespace SS14.Cdn.Helpers;
+namespace Robust.Cdn.Helpers;
 
 /// <summary>
 /// Expecting Microsoft top engineers to understand basic API design principles is too much to ask for,

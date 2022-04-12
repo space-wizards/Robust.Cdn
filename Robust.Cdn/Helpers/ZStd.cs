@@ -4,7 +4,7 @@ using System.Runtime.Serialization;
 using SharpZstd.Interop;
 using static SharpZstd.Interop.Zstd;
 
-namespace SS14.Cdn.Helpers;
+namespace Robust.Cdn.Helpers;
 
 public static class ZStd
 {

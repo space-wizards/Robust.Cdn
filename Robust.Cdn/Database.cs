@@ -1,7 +1,7 @@
 ﻿using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 
-namespace SS14.Cdn;
+namespace Robust.Cdn;
 
 public sealed class Database : IDisposable
 {

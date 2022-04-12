@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SS14.Cdn", "SS14.Cdn\SS14.Cdn.csproj", "{4B470D95-7DE8-4ED7-BB1B-0F17C53C7CE2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Robust.Cdn", "Robust.Cdn\Robust.Cdn.csproj", "{4B470D95-7DE8-4ED7-BB1B-0F17C53C7CE2}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Files", "Solution Files", "{D1E362E7-E406-42E1-A58D-F3318A12ACB6}"
 	ProjectSection(SolutionItems) = preProject

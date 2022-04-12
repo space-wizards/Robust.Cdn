@@ -1,4 +1,4 @@
-﻿namespace SS14.Cdn.Helpers;
+﻿namespace Robust.Cdn.Helpers;
 
 public static class StreamHelpers
 {
