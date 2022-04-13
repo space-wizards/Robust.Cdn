@@ -11,7 +11,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<CdnOptions>(builder.Configuration.GetSection(CdnOptions.Position));
 
 builder.Services.AddControllers();
-builder.Services.AddHostedService<DataLoader>();
+builder.Services.AddSingleton<DataLoader>();
+builder.Services.AddHostedService(services => services.GetRequiredService<DataLoader>());
+builder.Services.AddSingleton<DownloadRequestLogger>();
+builder.Services.AddHostedService(services => services.GetRequiredService<DownloadRequestLogger>());
 builder.Services.AddTransient<Database>();
 
 /*
@@ -45,6 +48,9 @@ app.Lifetime.ApplicationStopped.Register(SqliteConnection.ClearAllPools);
 
     loggerStartup.LogDebug("Running migrations!");
     var loggerMigrator = logFactory.CreateLogger<Migrator>();
+
+    Migrator.Migrate(loggerMigrator, db, "Robust.Cdn.Migrations");
+    loggerStartup.LogDebug("Done running migrations!");
 
     Migrator.Migrate(loggerMigrator, db, "Robust.Cdn.Migrations");
     loggerStartup.LogDebug("Done running migrations!");

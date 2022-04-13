@@ -44,4 +44,6 @@ public sealed class CdnOptions
     /// SendPreCompressed and StreamCompress are ignored and decided automatically.
     /// </summary>
     public float AutoStreamCompressRatio { get; set; } = 0.5f;
+
+    public bool LogRequests { get; set; } = false;
 }

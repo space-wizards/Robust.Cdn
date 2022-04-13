@@ -35,10 +35,28 @@ CREATE INDEX ContentManifestEntryContentId ON ContentManifestEntry(ContentId);
 CREATE TABLE ContentVersion(
     Id INTEGER PRIMARY KEY,
     Version TEXT NOT NULL UNIQUE,
-    TimeAdded DATE NOT NULL,
+    TimeAdded DATETIME NOT NULL,
     ManifestHash BLOB NOT NULL,
     ManifestData BLOB NOT NULL,
     -- Getting this count is somewhat slow so we cache it.
     CountDistinctBlobs INTEGER NOT NULL
 );
 
+
+-- Table for logging of requests
+-- These request blobs can get relatively large so I hope that storing them by hash will save a decent amount of bytes.
+CREATE TABLE RequestLogBlob(
+    Id INTEGER PRIMARY KEY,
+    Hash BLOB NOT NULL UNIQUE,
+    Data BLOB NOT NULL
+);
+
+CREATE TABLE RequestLog(
+    Id INTEGER PRIMARY KEY,
+    Time DATETIME NOT NULL,
+    Compression INTEGER NOT NULL,
+    Protocol INTEGER NOT NULL,
+    BytesSent INTEGER NOT NULL,
+    VersionId INTEGER NOT NULL REFERENCES ContentVersion(Id) ON DELETE RESTRICT,
+    BlobId INTEGER NOT NULL REFERENCES RequestLogBlob(Id) ON DELETE RESTRICT
+);

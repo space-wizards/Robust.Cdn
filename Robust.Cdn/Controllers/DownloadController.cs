@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Robust.Cdn.Helpers;
+using Robust.Cdn.Services;
 using SharpZstd.Interop;
 using SQLitePCL;
 
@@ -21,15 +22,18 @@ public sealed class DownloadController : ControllerBase
 
     private readonly Database _db;
     private readonly ILogger<DownloadController> _logger;
+    private readonly DownloadRequestLogger _requestLogger;
     private readonly CdnOptions _options;
 
     public DownloadController(
         Database db,
         ILogger<DownloadController> logger,
-        IOptionsSnapshot<CdnOptions> options)
+        IOptionsSnapshot<CdnOptions> options,
+        DownloadRequestLogger requestLogger)
     {
         _db = db;
         _logger = logger;
+        _requestLogger = requestLogger;
         _options = options.Value;
     }
 
@@ -86,6 +90,8 @@ public sealed class DownloadController : ControllerBase
 
         if (Request.Headers["X-Robust-Download-Protocol"] != "1")
             return BadRequest("Unknown X-Robust-Download-Protocol");
+
+        var protocol = 1;
 
         // TODO: this request limiting logic is pretty bad.
         HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = MaxDownloadRequestSize;
@@ -287,7 +293,22 @@ public sealed class DownloadController : ControllerBase
             }
         }
 
-        _logger.LogTrace("Total data sent: {BytesSent} B", countStream.Written);
+        var bytesSent = countStream.Written;
+        _logger.LogTrace("Total data sent: {BytesSent} B", bytesSent);
+
+        if (_options.LogRequests)
+        {
+            var logCompression = DownloadRequestLogger.RequestLogCompression.None;
+            if (preCompressed)
+                logCompression |= DownloadRequestLogger.RequestLogCompression.PreCompress;
+            if (doStreamCompression)
+                logCompression |= DownloadRequestLogger.RequestLogCompression.Stream;
+
+            var log = new DownloadRequestLogger.RequestLog(
+                buf, logCompression, protocol, DateTime.UtcNow, versionId, bytesSent);
+
+            await _requestLogger.QueueLog(log);
+        }
 
         return new NoOpActionResult();
     }
