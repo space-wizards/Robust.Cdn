@@ -37,6 +37,8 @@ CREATE TABLE ContentVersion(
     Version TEXT NOT NULL UNIQUE,
     TimeAdded DATE NOT NULL,
     ManifestHash BLOB NOT NULL,
-    ManifestData BLOB NOT NULL
+    ManifestData BLOB NOT NULL,
+    -- Getting this count is somewhat slow so we cache it.
+    CountDistinctBlobs INTEGER NOT NULL
 );
 

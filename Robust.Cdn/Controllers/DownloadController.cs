@@ -21,16 +21,16 @@ public sealed class DownloadController : ControllerBase
 
     private readonly Database _db;
     private readonly ILogger<DownloadController> _logger;
-    private readonly IOptions<CdnOptions> _options;
+    private readonly CdnOptions _options;
 
     public DownloadController(
         Database db,
         ILogger<DownloadController> logger,
-        IOptions<CdnOptions> options)
+        IOptionsSnapshot<CdnOptions> options)
     {
         _db = db;
         _logger = logger;
-        _options = options;
+        _options = options.Value;
     }
 
     [HttpGet("manifest")]
@@ -90,12 +90,11 @@ public sealed class DownloadController : ControllerBase
         // TODO: this request limiting logic is pretty bad.
         HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = MaxDownloadRequestSize;
 
-        var options = _options.Value;
         var con = _db.Connection;
         con.BeginTransaction();
 
-        var versionId = con.QuerySingleOrDefault<long>(
-            "SELECT Id FROM ContentVersion WHERE Version = @Version",
+        var (versionId, countDistinctBlobs) = con.QuerySingleOrDefault<(long, int)>(
+            "SELECT Id, CountDistinctBlobs FROM ContentVersion WHERE Version = @Version",
             new
             {
                 Version = version
@@ -118,6 +117,7 @@ public sealed class DownloadController : ControllerBase
 
         var bits = new BitArray(entriesCount);
         var offset = 0;
+        var countFilesRequested = 0;
         while (offset < buf.Length)
         {
             var index = BinaryPrimitives.ReadInt32LittleEndian(buf.Slice(offset, 4).Span);
@@ -131,22 +131,61 @@ public sealed class DownloadController : ControllerBase
             bits[index] = true;
 
             offset += 4;
+            countFilesRequested += 1;
         }
 
         var outStream = Response.Body;
 
-        if (options.StreamCompression)
+        var countStream = new CountWriteStream(outStream);
+        outStream = countStream;
+
+        var optStreamCompression = _options.StreamCompress;
+        var optPreCompression = _options.SendPreCompressed;
+        var optAutoStreamCompressRatio = _options.AutoStreamCompressRatio;
+
+        if (optAutoStreamCompressRatio > 0)
+        {
+            var requestRatio = countFilesRequested / (float) countDistinctBlobs;
+            _logger.LogTrace("Auto stream compression ratio: {RequestRatio}", requestRatio);
+            if (requestRatio > optAutoStreamCompressRatio)
+            {
+                optStreamCompression = true;
+                optPreCompression = false;
+            }
+            else
+            {
+                optStreamCompression = false;
+                optPreCompression = true;
+            }
+        }
+
+        var doStreamCompression = optStreamCompression && AcceptsZStd;
+        _logger.LogTrace("Transfer is using stream-compression: {PreCompressed}", doStreamCompression);
+
+        if (doStreamCompression)
         {
             var zStdCompressStream = new ZStdCompressStream(outStream);
             zStdCompressStream.Context.SetParameter(
                 ZSTD_cParameter.ZSTD_c_compressionLevel,
-                options.StreamCompressionLevel);
+                _options.StreamCompressLevel);
 
             outStream = zStdCompressStream;
             Response.Headers.ContentEncoding = "zstd";
         }
 
-        var preCompressed = true;
+        // Compression options for individual compression get kind of gnarly here:
+        // We cannot assume that the database was constructed with the current set of options
+        // that is, individual compression and such.
+        // If you ingest all versions with individual compression OFF then enable it,
+        // we have no way to know whether the current blobs are properly compressed.
+        // Also, you can have individual compression OFF now, and still have compressed blobs in the DB.
+        // For this reason, we basically ignore CdnOptions.IndividualCompression here, unlike engine-side ACZ.
+        // Whether pre-compression is done is actually based off IndividualDecompression instead.
+        // Stream compression does not do overriding behavior it just sits on top of everything if you turn it on.
+
+        var preCompressed = optPreCompression;
+
+        _logger.LogTrace("Transfer is using pre-compression: {PreCompressed}", preCompressed);
 
         var fileHeaderSize = 4;
         if (preCompressed)
@@ -166,65 +205,89 @@ public sealed class DownloadController : ControllerBase
             await outStream.WriteAsync(streamHeader);
 
             SqliteBlobStream? blob = null;
+            ZStdDecompressStream? decompress = null;
 
-            using var stmt =
-                con.Handle!.Prepare(
-                    "SELECT c.Compression, c.Size, c.Id " +
-                    "FROM ContentManifestEntry cme " +
-                    "INNER JOIN Content c on c.Id = cme.ContentId " +
-                    "WHERE cme.VersionId = @VersionId AND cme.ManifestIdx = @ManifestIdx");
-
-            stmt.BindInt64(1, versionId); // @VersionId
-
-            offset = 0;
-            var swSqlite = new Stopwatch();
-            var count = 0;
-            while (offset < buf.Length)
+            try
             {
-                var index = BinaryPrimitives.ReadInt32LittleEndian(buf.Slice(offset, 4).Span);
+                using var stmt =
+                    con.Handle!.Prepare(
+                        "SELECT c.Compression, c.Size, c.Id " +
+                        "FROM ContentManifestEntry cme " +
+                        "INNER JOIN Content c on c.Id = cme.ContentId " +
+                        "WHERE cme.VersionId = @VersionId AND cme.ManifestIdx = @ManifestIdx");
 
-                swSqlite.Start();
-                stmt.BindInt(2, index);
+                stmt.BindInt64(1, versionId); // @VersionId
 
-                if (stmt.Step() != raw.SQLITE_ROW)
-                    throw new InvalidOperationException("Unable to find manifest row??");
-
-                var compression = (ContentCompression)stmt.ColumnInt(0);
-                var size = stmt.ColumnInt(1);
-                var rowId = stmt.ColumnInt64(2);
-
-                stmt.Reset();
-                swSqlite.Stop();
-
-                // _aczSawmill.Debug($"{index:D5}: {blobLength:D8} {dataOffset:D8} {dataLength:D8}");
-
-                BinaryPrimitives.WriteInt32LittleEndian(fileHeader, size);
-
-                if (blob == null)
-                    blob = SqliteBlobStream.Open(con.Handle!, "main", "Content", "Data", rowId, true);
-                else
-                    blob.Reopen(rowId);
-
-                if (preCompressed)
+                offset = 0;
+                var swSqlite = new Stopwatch();
+                var count = 0;
+                while (offset < buf.Length)
                 {
-                    BinaryPrimitives.WriteInt32LittleEndian(
-                        fileHeader.AsSpan(4, 4),
-                        compression == ContentCompression.ZStd ? (int)blob.Length : 0);
+                    var index = BinaryPrimitives.ReadInt32LittleEndian(buf.Slice(offset, 4).Span);
+
+                    swSqlite.Start();
+                    stmt.BindInt(2, index);
+
+                    if (stmt.Step() != raw.SQLITE_ROW)
+                        throw new InvalidOperationException("Unable to find manifest row??");
+
+                    var compression = (ContentCompression)stmt.ColumnInt(0);
+                    var size = stmt.ColumnInt(1);
+                    var rowId = stmt.ColumnInt64(2);
+
+                    stmt.Reset();
+                    swSqlite.Stop();
+
+                    // _aczSawmill.Debug($"{index:D5}: {blobLength:D8} {dataOffset:D8} {dataLength:D8}");
+
+                    BinaryPrimitives.WriteInt32LittleEndian(fileHeader, size);
+
+                    if (blob == null)
+                    {
+                        blob = SqliteBlobStream.Open(con.Handle!, "main", "Content", "Data", rowId, true);
+                        if (!preCompressed)
+                            decompress = new ZStdDecompressStream(blob, ownStream: false);
+                    }
+                    else
+                    {
+                        blob.Reopen(rowId);
+                    }
+
+                    Stream copyFromStream = blob;
+                    if (preCompressed)
+                    {
+                        // If we are doing pre-compression, just write the DB contents directly.
+                        BinaryPrimitives.WriteInt32LittleEndian(
+                            fileHeader.AsSpan(4, 4),
+                            compression == ContentCompression.ZStd ? (int)blob.Length : 0);
+                    }
+                    else if (compression == ContentCompression.ZStd)
+                    {
+                        // If we are not doing pre-compression but the DB entry is compressed, we have to decompress!
+                        copyFromStream = decompress!;
+                    }
+
+                    await outStream.WriteAsync(fileHeader);
+
+                    await copyFromStream.CopyToAsync(outStream);
+
+                    offset += 4;
+                    count += 1;
                 }
 
-                await outStream.WriteAsync(fileHeader);
-
-                await blob.CopyToAsync(outStream);
-
-                offset += 4;
-                count += 1;
+                _logger.LogTrace(
+                    "Total SQLite: {SqliteElapsed} ms, ns / iter: {NanosPerIter}",
+                    swSqlite.ElapsedMilliseconds,
+                    swSqlite.Elapsed.TotalMilliseconds * 1_000_000 / count);
             }
-
-            _logger.LogTrace(
-                "Total SQLite: {SqliteElapsed} ms, ns / iter: {NanosPerIter}",
-                swSqlite.ElapsedMilliseconds,
-                swSqlite.Elapsed.TotalMilliseconds * 1_000_000 / count);
+            finally
+            {
+                blob?.Dispose();
+                decompress?.Dispose();
+            }
         }
+
+        _logger.LogTrace("Total data sent: {BytesSent} B", countStream.Written);
 
         return new NoOpActionResult();
     }

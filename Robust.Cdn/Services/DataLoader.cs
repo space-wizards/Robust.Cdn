@@ -92,8 +92,8 @@ public sealed class DataLoader : BackgroundService
                 _logger.LogDebug("Ingesting new version: {Version}", version);
 
                 var versionId = connection.ExecuteScalar<long>(
-                    "INSERT INTO ContentVersion (Version, TimeAdded, ManifestHash, ManifestData) " +
-                    "VALUES (@Version, datetime('now'), zeroblob(0), zeroblob(0)) " +
+                    "INSERT INTO ContentVersion (Version, TimeAdded, ManifestHash, ManifestData, CountDistinctBlobs) " +
+                    "VALUES (@Version, datetime('now'), zeroblob(0), zeroblob(0), 0) " +
                     "RETURNING Id",
                     new { Version = version });
 
@@ -147,7 +147,7 @@ public sealed class DataLoader : BackgroundService
                         var compression = ContentCompression.None;
 
                         // Try compression maybe.
-                        if (options.IndividualCompression)
+                        if (options.BlobCompress)
                         {
                             BufferHelpers.EnsurePooledBuffer(
                                 ref compressBuffer,
@@ -157,9 +157,9 @@ public sealed class DataLoader : BackgroundService
                             var compressedLength = compressor.Compress(
                                 compressBuffer,
                                 readData,
-                                options.IndividualCompressionLevel);
+                                options.BlobCompressLevel);
 
-                            if (compressedLength + options.IndividualCompressSavingsThreshold < dataLength)
+                            if (compressedLength + options.BlobCompressSavingsThreshold < dataLength)
                             {
                                 compression = ContentCompression.ZStd;
                                 writeData = compressBuffer.AsSpan(0, compressedLength);
@@ -270,6 +270,16 @@ public sealed class DataLoader : BackgroundService
 
                     manifestBlob.Write(compressedData);
                 }
+
+                // Calculate CountBlobsDeduplicated on ContentVersion
+
+                connection.Execute(
+                    "UPDATE ContentVersion AS cv " +
+                    "SET CountDistinctBlobs = " +
+                    "   (SELECT COUNT(DISTINCT cme.ContentId) FROM ContentManifestEntry cme WHERE cme.VersionId = cv.Id) " +
+                    "WHERE cv.Id = @VersionId",
+                    new { VersionId = versionId }
+                );
             }
         }
         finally
