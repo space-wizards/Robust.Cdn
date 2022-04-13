@@ -39,8 +39,6 @@ public sealed class DownloadRequestLogger : BackgroundService
         {
             await _channelReader.WaitToReadAsync(stoppingToken);
 
-            _logger.LogInformation("Updating versions");
-
             WriteLogs();
         }
 
@@ -54,6 +52,7 @@ public sealed class DownloadRequestLogger : BackgroundService
         var connection = scope.ServiceProvider.GetRequiredService<Database>().Connection;
         using var transaction = connection.BeginTransaction();
 
+        var countWritten = 0;
         while (_channelReader.TryRead(out var entry))
         {
             var hash = CryptoGenericHashBlake2B.Hash(32, entry.RequestData.Span, ReadOnlySpan<byte>.Empty);
@@ -94,9 +93,12 @@ public sealed class DownloadRequestLogger : BackgroundService
                     entry.BytesSent,
                     BlobId = blobRowId
                 });
+
+            countWritten += 1;
         }
 
         transaction.Commit();
+        _logger.LogDebug("Wrote {CountWritten} log entries to disk", countWritten);
     }
 
     public sealed record RequestLog(
