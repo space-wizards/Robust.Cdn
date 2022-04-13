@@ -93,6 +93,12 @@ internal sealed class SqliteBlobStream : Stream
         return toRead;
     }
 
+    // While we aren't an async stream, we can implement ReadAsync so there's less indirection.
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromResult(Read(buffer.Span));
+    }
+
     public override long Seek(long offset, SeekOrigin origin)
     {
         ThrowIfDisposed();
