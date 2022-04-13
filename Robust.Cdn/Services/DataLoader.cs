@@ -26,12 +26,12 @@ public sealed class DataLoader : BackgroundService
         _options = options;
         _logger = logger;
 
-        var channel = Channel.CreateBounded<object?>(new BoundedChannelOptions(2) { SingleReader = true });
+        var channel = Channel.CreateBounded<object?>(new BoundedChannelOptions(1) { SingleReader = true });
         _channelReader = channel.Reader;
         _channelWriter = channel.Writer;
     }
 
-    public async Task QueueUpdateVersions()
+    public async ValueTask QueueUpdateVersions()
     {
         await _channelWriter.WriteAsync(null);
     }

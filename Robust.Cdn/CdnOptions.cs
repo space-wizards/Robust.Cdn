@@ -46,4 +46,6 @@ public sealed class CdnOptions
     public float AutoStreamCompressRatio { get; set; } = 0.5f;
 
     public bool LogRequests { get; set; } = false;
+
+    public string UpdateToken { get; set; } = "CHANGE ME";
 }
