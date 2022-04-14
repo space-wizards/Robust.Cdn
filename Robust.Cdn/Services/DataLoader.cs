@@ -93,9 +93,13 @@ public sealed class DataLoader : BackgroundService
             {
                 if (versionIdx % 5 == 0)
                 {
+                    _logger.LogDebug("Doing interim commit");
+
+                    blob?.Dispose();
+                    blob = null;
+
                     transaction.Commit();
                     transaction = connection.BeginTransaction();
-                    _logger.LogInformation("Doing interim commit");
                 }
 
                 cancel.ThrowIfCancellationRequested();
