@@ -39,7 +39,14 @@ public sealed class DownloadRequestLogger : BackgroundService
         {
             await _channelReader.WaitToReadAsync(stoppingToken);
 
-            WriteLogs();
+            try
+            {
+                WriteLogs();
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Error while logging requests");
+            }
         }
 
         // ReSharper disable once FunctionNeverReturns

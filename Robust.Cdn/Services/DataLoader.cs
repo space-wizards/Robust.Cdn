@@ -49,7 +49,14 @@ public sealed class DataLoader : BackgroundService
 
             _logger.LogInformation("Updating versions");
 
-            Update(stoppingToken);
+            try
+            {
+                Update(stoppingToken);
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Error while loading new content versions");
+            }
         }
 
         // ReSharper disable once FunctionNeverReturns
