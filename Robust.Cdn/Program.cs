@@ -5,6 +5,7 @@ using Robust.Cdn;
 using Robust.Cdn.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseSystemd();
 
 // Add services to the container.
 
