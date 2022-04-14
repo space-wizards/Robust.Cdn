@@ -250,7 +250,7 @@ public sealed class DownloadController : ControllerBase
 
                     if (blob == null)
                     {
-                        blob = SqliteBlobStream.Open(con.Handle!, "main", "Content", "Data", rowId, true);
+                        blob = SqliteBlobStream.Open(con.Handle!, "main", "Content", "Data", rowId, false);
                         if (!preCompressed)
                             decompress = new ZStdDecompressStream(blob, ownStream: false);
                     }
