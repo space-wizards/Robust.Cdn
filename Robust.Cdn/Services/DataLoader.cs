@@ -294,6 +294,8 @@ public sealed class DataLoader : BackgroundService
         }
 
         transaction.Commit();
+
+        GC.Collect();
     }
 
     private List<string> FindNewVersions(SqliteConnection con)
