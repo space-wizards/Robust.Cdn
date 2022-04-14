@@ -41,7 +41,7 @@ public sealed class DownloadController : ControllerBase
     public IActionResult GetManifest(string version)
     {
         var con = _db.Connection;
-        con.BeginTransaction();
+        con.BeginTransaction(deferred: true);
 
         var (row, hash) = con.QuerySingleOrDefault<(long, byte[])>(
             "SELECT Id, ManifestHash FROM ContentVersion WHERE Version = @Version",
@@ -97,7 +97,7 @@ public sealed class DownloadController : ControllerBase
         HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = MaxDownloadRequestSize;
 
         var con = _db.Connection;
-        con.BeginTransaction();
+        con.BeginTransaction(deferred: true);
 
         var (versionId, countDistinctBlobs) = con.QuerySingleOrDefault<(long, int)>(
             "SELECT Id, CountDistinctBlobs FROM ContentVersion WHERE Version = @Version",

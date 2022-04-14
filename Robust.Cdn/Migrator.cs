@@ -13,7 +13,7 @@ public sealed class Migrator
     {
         logger.LogDebug("Migrating with prefix {Prefix}", prefix);
 
-        using var transaction = connection.BeginTransaction();
+        using var transaction = connection.BeginTransaction(deferred: true);
 
         connection.Execute(@"
         CREATE TABLE IF NOT EXISTS SchemaVersions(
