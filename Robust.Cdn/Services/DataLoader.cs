@@ -40,6 +40,9 @@ public sealed class DataLoader : BackgroundService
     {
         _channelWriter.TryWrite(null);
 
+        // Idk if there's a better way but make sure we don't hold up startup.
+        await Task.Delay(1000, stoppingToken);
+
         while (true)
         {
             await _channelReader.ReadAsync(stoppingToken);
@@ -89,7 +92,7 @@ public sealed class DataLoader : BackgroundService
             {
                 cancel.ThrowIfCancellationRequested();
 
-                _logger.LogDebug("Ingesting new version: {Version}", version);
+                _logger.LogInformation("Ingesting new version: {Version}", version);
 
                 var versionId = connection.ExecuteScalar<long>(
                     "INSERT INTO ContentVersion (Version, TimeAdded, ManifestHash, ManifestData, CountDistinctBlobs) " +
@@ -314,7 +317,7 @@ public sealed class DataLoader : BackgroundService
             }
 
             newVersions.Add(version);
-            _logger.LogInformation("Found new version: {Version}", version);
+            _logger.LogTrace("Found new version: {Version}", version);
         }
 
         return newVersions;
