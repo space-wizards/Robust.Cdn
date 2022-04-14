@@ -332,7 +332,7 @@ public sealed class DataLoader : BackgroundService
                 continue;
             }
 
-            if (!File.Exists(Path.Combine(version, _options.Value.ClientZipName)))
+            if (!File.Exists(Path.Combine(versionDirectory, _options.Value.ClientZipName)))
             {
                 _logger.LogWarning("On-disk version is missing client zip: {Version}", version);
                 continue;
