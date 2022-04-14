@@ -61,7 +61,7 @@ public sealed class DataLoader : BackgroundService
 
         var options = _options.Value;
         var connection = scope.ServiceProvider.GetRequiredService<Database>().Connection;
-        using var transaction = connection.BeginTransaction();
+        var transaction = connection.BeginTransaction();
 
         var newVersions = FindNewVersions(connection);
 
@@ -88,8 +88,16 @@ public sealed class DataLoader : BackgroundService
 
         try
         {
+            var versionIdx = 0;
             foreach (var version in newVersions)
             {
+                if (versionIdx % 5 == 0)
+                {
+                    transaction.Commit();
+                    transaction = connection.BeginTransaction();
+                    _logger.LogInformation("Doing interim commit");
+                }
+
                 cancel.ThrowIfCancellationRequested();
 
                 _logger.LogInformation("Ingesting new version: {Version}", version);
@@ -283,6 +291,8 @@ public sealed class DataLoader : BackgroundService
                     "WHERE cv.Id = @VersionId",
                     new { VersionId = versionId }
                 );
+
+                versionIdx += 1;
             }
         }
         finally
