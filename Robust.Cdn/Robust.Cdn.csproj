@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyVersion>1.0.0</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>
