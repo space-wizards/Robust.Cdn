@@ -15,21 +15,25 @@ public class StatusController : ControllerBase
     }
 
     [HttpGet("control/status")]
-    public async Task<IActionResult> GetControlStatus()
+    public IActionResult GetControlStatus()
     {
-        var con = _db.Connection;
-        con.BeginTransaction(deferred: true);
-
-        var versionCount = con.QuerySingleOrDefault<int>(
-            "SELECT COUNT(Id) FROM ContentVersion");
-
-        var assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
-
-        return Ok(new
+        try
         {
-            Status = "OK",
-            Version = assemblyVersion?.ToString() ?? "Unknown",
-            ContentVersions = versionCount
-        });
+            var con = _db.Connection;
+            var versionCount = con.QuerySingleOrDefault<int>("SELECT COUNT(Id) FROM ContentVersion");
+
+            var assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
+
+            return Ok(new
+            {
+                Status = "OK",
+                Version = assemblyVersion?.ToString() ?? "Unknown",
+                ContentVersions = versionCount
+            });
+        }
+        catch
+        {
+            return StatusCode(500, new { Status = "Internal Server Error" });
+        }
     }
 }
