@@ -20,3 +20,7 @@ FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "Robust.Cdn.dll"]
+VOLUME /database
+ENV CDN__DatabaseFileName=/database/content.db
+VOLUME /builds
+ENV CDN__VersionDiskPath=/builds
