@@ -41,7 +41,13 @@ public sealed class DownloadRequestLogger : BackgroundService
 
             try
             {
-                WriteLogs();
+                var storage = _options.Value.LogRequestStorage;
+                if (storage == RequestLogStorage.Database)
+                    WriteLogsDatabase();
+                else if (storage == RequestLogStorage.Console)
+                    WriteLogsConsole();
+                else
+                    _logger.LogError("Unsupported LogRequestStorage configured: ${Format}", storage);
             }
             catch (Exception e)
             {
@@ -52,7 +58,7 @@ public sealed class DownloadRequestLogger : BackgroundService
         // ReSharper disable once FunctionNeverReturns
     }
 
-    private void WriteLogs()
+    private void WriteLogsDatabase()
     {
         using var scope = _scopeFactory.CreateScope();
 
@@ -106,6 +112,25 @@ public sealed class DownloadRequestLogger : BackgroundService
 
         transaction.Commit();
         _logger.LogDebug("Wrote {CountWritten} log entries to disk", countWritten);
+    }
+
+    private void WriteLogsConsole()
+    {
+        var countWritten = 0;
+        while (_channelReader.TryRead(out var entry))
+        {
+            var hash = CryptoGenericHashBlake2B.Hash(32, entry.RequestData.Span, ReadOnlySpan<byte>.Empty);
+            _logger.LogInformation("RequestLog {Time} {Compression} {Protocol} {VersionId} {BytesSent} {DataSize} {Hash}",
+                entry.Time.ToString("o", System.Globalization.CultureInfo.InvariantCulture),
+                entry.Compression,
+                entry.Protocol,
+                entry.VersionId,
+                entry.BytesSent,
+                entry.RequestData.Length,
+                Convert.ToHexString(hash));
+            countWritten += 1;
+        }
+        _logger.LogDebug("Wrote {CountWritten} log entries to console", countWritten);
     }
 
     public sealed record RequestLog(
