@@ -211,30 +211,33 @@ internal sealed class ZStdDecompressStream : Stream
                     return 0;
             }
 
-            unsafe
-            {
-                fixed (byte* inputPtr = _buffer)
-                fixed (byte* outputPtr = buffer.Span)
-                {
-                    ZSTD_outBuffer outputBuf = default;
-                    outputBuf.dst = outputPtr;
-                    outputBuf.pos = 0;
-                    outputBuf.size = (nuint)buffer.Length;
-                    ZSTD_inBuffer inputBuf = default;
-                    inputBuf.src = inputPtr;
-                    inputBuf.pos = (nuint)_bufferPos;
-                    inputBuf.size = (nuint)_bufferSize;
-
-                    var ret = ZSTD_decompressStream(_ctx, &outputBuf, &inputBuf);
-
-                    _bufferPos = (int)inputBuf.pos;
-                    ZStdException.ThrowIfError(ret);
-
-                    if (outputBuf.pos > 0)
-                        return (int)outputBuf.pos;
-                }
-            }
+            var outputPos = DecompressChunk();
+            if (outputPos > 0)
+                return outputPos;
         } while (true);
+
+        unsafe int DecompressChunk()
+        {
+            fixed (byte* inputPtr = _buffer)
+            fixed (byte* outputPtr = buffer.Span)
+            {
+                ZSTD_outBuffer outputBuf = default;
+                outputBuf.dst = outputPtr;
+                outputBuf.pos = 0;
+                outputBuf.size = (nuint)buffer.Length;
+                ZSTD_inBuffer inputBuf = default;
+                inputBuf.src = inputPtr;
+                inputBuf.pos = (nuint)_bufferPos;
+                inputBuf.size = (nuint)_bufferSize;
+
+                var ret = ZSTD_decompressStream(_ctx, &outputBuf, &inputBuf);
+
+                _bufferPos = (int)inputBuf.pos;
+                ZStdException.ThrowIfError(ret);
+
+                return (int)outputBuf.pos;
+            }
+        }
     }
 
     public override long Seek(long offset, SeekOrigin origin)
@@ -345,25 +348,7 @@ internal sealed class ZStdCompressStream : Stream
 
         while (true)
         {
-            nuint err;
-            unsafe
-            {
-                fixed (byte* outPtr = _buffer)
-                {
-                    ZSTD_outBuffer outBuf = default;
-                    outBuf.size = (nuint)_buffer.Length;
-                    outBuf.pos = outBufPos;
-                    outBuf.dst = outPtr;
-
-                    ZSTD_inBuffer inBuf;
-
-
-                    err = ZSTD_compressStream2(Context.Context, &outBuf, &inBuf, directive);
-                    ZStdException.ThrowIfError(err);
-                    outBufPos = outBuf.pos;
-                    _bufferPos = (int)outBuf.pos;
-                }
-            }
+            var err = FlushChunk();
 
             await _baseStream.WriteAsync(_buffer.AsMemory(0, (int)outBufPos), cancel);
             _bufferPos = 0;
@@ -374,6 +359,26 @@ internal sealed class ZStdCompressStream : Stream
         }
 
         await _baseStream.FlushAsync(cancel);
+
+        unsafe nuint FlushChunk()
+        {
+            fixed (byte* outPtr = _buffer)
+            {
+                ZSTD_outBuffer outBuf = default;
+                outBuf.size = (nuint)_buffer.Length;
+                outBuf.pos = outBufPos;
+                outBuf.dst = outPtr;
+
+                ZSTD_inBuffer inBuf;
+
+                var err = ZSTD_compressStream2(Context.Context, &outBuf, &inBuf, directive);
+                ZStdException.ThrowIfError(err);
+                outBufPos = outBuf.pos;
+                _bufferPos = (int)outBuf.pos;
+
+                return err;
+            }
+        }
     }
 
     public override int Read(byte[] buffer, int offset, int count)
@@ -446,29 +451,7 @@ internal sealed class ZStdCompressStream : Stream
 
         while (true)
         {
-            unsafe
-            {
-                fixed (byte* outPtr = _buffer)
-                fixed (byte* inPtr = buffer.Span)
-                {
-                    ZSTD_outBuffer outBuf = default;
-                    outBuf.size = (nuint)_buffer.Length;
-                    outBuf.pos = outBufPos;
-
-                    ZSTD_inBuffer inBuf = default;
-                    inBuf.pos = inBufPos;
-                    inBuf.size = inBufSize;
-
-                    outBuf.dst = outPtr;
-                    inBuf.src = inPtr;
-
-                    var err = ZSTD_compressStream2(Context.Context, &outBuf, &inBuf, ZSTD_EndDirective.ZSTD_e_continue);
-                    ZStdException.ThrowIfError(err);
-                    _bufferPos = (int)outBuf.pos;
-                    outBufPos = outBuf.pos;
-                    inBufPos = inBuf.pos;
-                }
-            }
+            CompressChunk();
 
             if (inBufPos >= inBufSize)
                 break;
@@ -477,6 +460,30 @@ internal sealed class ZStdCompressStream : Stream
             await _baseStream.WriteAsync(_buffer.AsMemory(0, (int)outBufPos), cancellationToken);
             _bufferPos = 0;
             outBufPos = 0;
+        }
+
+        unsafe void CompressChunk()
+        {
+            fixed (byte* outPtr = _buffer)
+            fixed (byte* inPtr = buffer.Span)
+            {
+                ZSTD_outBuffer outBuf = default;
+                outBuf.size = (nuint)_buffer.Length;
+                outBuf.pos = outBufPos;
+
+                ZSTD_inBuffer inBuf = default;
+                inBuf.pos = inBufPos;
+                inBuf.size = inBufSize;
+
+                outBuf.dst = outPtr;
+                inBuf.src = inPtr;
+
+                var err = ZSTD_compressStream2(Context.Context, &outBuf, &inBuf, ZSTD_EndDirective.ZSTD_e_continue);
+                ZStdException.ThrowIfError(err);
+                _bufferPos = (int)outBuf.pos;
+                outBufPos = outBuf.pos;
+                inBufPos = inBuf.pos;
+            }
         }
     }
 
