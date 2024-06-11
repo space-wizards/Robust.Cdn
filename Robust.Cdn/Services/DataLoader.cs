@@ -314,6 +314,8 @@ public sealed class DataLoader : BackgroundService
             ArrayPool<byte>.Shared.Return(compressBuffer);
         }
 
+        _logger.LogDebug("Committing database");
+
         transaction.Commit();
 
         GC.Collect();
@@ -323,11 +325,14 @@ public sealed class DataLoader : BackgroundService
     {
         using var stmtCheckVersion = con.Handle!.Prepare("SELECT 1 FROM ContentVersion WHERE Version = ?");
 
-        var newVersions = new List<string>();
+        var newVersions = new List<(string, DateTime)>();
 
         foreach (var versionDirectory in Directory.EnumerateDirectories(_options.Value.VersionDiskPath))
         {
+            var createdTime = Directory.GetLastWriteTime(versionDirectory);
             var version = Path.GetFileName(versionDirectory);
+
+            _logger.LogTrace("Found version directory: {VersionDir}, write time: {WriteTime}", versionDirectory, createdTime);
 
             stmtCheckVersion.Reset();
             stmtCheckVersion.BindString(1, version);
@@ -345,10 +350,10 @@ public sealed class DataLoader : BackgroundService
                 continue;
             }
 
-            newVersions.Add(version);
+            newVersions.Add((version, createdTime));
             _logger.LogTrace("Found new version: {Version}", version);
         }
 
-        return newVersions;
+        return newVersions.OrderByDescending(x => x.Item2).Select(x => x.Item1).ToList();
     }
 }
