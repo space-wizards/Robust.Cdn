@@ -1,4 +1,5 @@
-﻿using Microsoft.Data.Sqlite;
+﻿using Dapper;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 
 namespace Robust.Cdn;
@@ -26,6 +27,7 @@ public sealed class Database : IDisposable
 
         var con = new SqliteConnection(conString);
         con.Open();
+        con.Execute("PRAGMA journal_mode=WAL");
         return con;
     }
 }
