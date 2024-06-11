@@ -315,7 +315,8 @@ public sealed class DownloadController : ControllerBase
 
     // TODO: Crappy Accept-Encoding parser
     private bool AcceptsZStd => Request.Headers.AcceptEncoding.Count > 0
-                                && Request.Headers.AcceptEncoding[0].Contains("zstd");
+                                && Request.Headers.AcceptEncoding[0] is { } header
+                                && header.Contains("zstd");
 
     public sealed class NoOpActionResult : IActionResult
     {

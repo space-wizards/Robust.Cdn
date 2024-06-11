@@ -29,7 +29,7 @@ public sealed class UpdateController : ControllerBase
         var auth = authHeader[0];
 
         // Idk does using Bearer: make sense here?
-        if (!auth.StartsWith("Bearer "))
+        if (auth == null || !auth.StartsWith("Bearer "))
             return Unauthorized("Need Bearer: auth type");
 
         var token = auth["Bearer ".Length..];
