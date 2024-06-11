@@ -1,4 +1,6 @@
-﻿namespace Robust.Cdn;
+﻿using Robust.Cdn.Services;
+
+namespace Robust.Cdn;
 
 public sealed class CdnOptions
 {
@@ -69,9 +71,14 @@ public sealed class CdnOptions
     public float AutoStreamCompressRatio { get; set; } = 0.5f;
 
     /// <summary>
-    /// Log all download requests to the database.
+    /// Log all download requests
     /// </summary>
     public bool LogRequests { get; set; } = false;
+
+    /// <summary>
+    /// Log download requests to database or console
+    /// </summary>
+    public RequestLogStorage LogRequestStorage { get; set; } = RequestLogStorage.Database;
 
     /// <summary>
     /// Authentication token to initiate version updates via the POST /control/update endpoint.
