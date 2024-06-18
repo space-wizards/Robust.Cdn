@@ -13,6 +13,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Files", "Solution 
 		Directory.Packages.props = Directory.Packages.props
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Robust.Cdn.Lib", "Robust.Cdn.Lib\Robust.Cdn.Lib.csproj", "{9B66C804-46C1-4D91-A028-8D12E25827CA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Robust.Cdn.Downloader", "Robust.Cdn.Downloader\Robust.Cdn.Downloader.csproj", "{937F7101-5979-4A47-ABF4-36405B839D4A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -23,5 +27,13 @@ Global
 		{4B470D95-7DE8-4ED7-BB1B-0F17C53C7CE2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4B470D95-7DE8-4ED7-BB1B-0F17C53C7CE2}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4B470D95-7DE8-4ED7-BB1B-0F17C53C7CE2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9B66C804-46C1-4D91-A028-8D12E25827CA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9B66C804-46C1-4D91-A028-8D12E25827CA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9B66C804-46C1-4D91-A028-8D12E25827CA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9B66C804-46C1-4D91-A028-8D12E25827CA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{937F7101-5979-4A47-ABF4-36405B839D4A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{937F7101-5979-4A47-ABF4-36405B839D4A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{937F7101-5979-4A47-ABF4-36405B839D4A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{937F7101-5979-4A47-ABF4-36405B839D4A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

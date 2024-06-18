@@ -6,6 +6,7 @@ using Dapper;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using Robust.Cdn.Helpers;
+using Robust.Cdn.Lib;
 using SpaceWizards.Sodium;
 using SQLitePCL;
 
@@ -75,6 +76,8 @@ public sealed class DataLoader : BackgroundService
         if (newVersions.Count == 0)
             return;
 
+        var forkId = EnsureForkCreated(connection);
+
         using var stmtLookupContent = connection.Handle!.Prepare("SELECT Id FROM Content WHERE Hash = ?");
         using var stmtInsertContent = connection.Handle!.Prepare(
             "INSERT INTO Content (Hash, Size, Compression, Data) " +
@@ -114,10 +117,10 @@ public sealed class DataLoader : BackgroundService
                 _logger.LogInformation("Ingesting new version: {Version}", version);
 
                 var versionId = connection.ExecuteScalar<long>(
-                    "INSERT INTO ContentVersion (Version, TimeAdded, ManifestHash, ManifestData, CountDistinctBlobs) " +
-                    "VALUES (@Version, datetime('now'), zeroblob(0), zeroblob(0), 0) " +
+                    "INSERT INTO ContentVersion (ForkId, Version, TimeAdded, ManifestHash, ManifestData, CountDistinctBlobs) " +
+                    "VALUES (@ForkId, @Version, datetime('now'), zeroblob(0), zeroblob(0), 0) " +
                     "RETURNING Id",
-                    new { Version = version });
+                    new { Version = version, ForkId = forkId });
 
                 stmtInsertContentManifestEntry.BindInt64(1, versionId);
 
@@ -355,5 +358,20 @@ public sealed class DataLoader : BackgroundService
         }
 
         return newVersions.OrderByDescending(x => x.Item2).Select(x => x.Item1).ToList();
+    }
+
+    private int EnsureForkCreated(SqliteConnection connection)
+    {
+        var defaultName = _options.Value.DefaultFork ?? throw new InvalidOperationException("Have no default fork to load into!");
+
+        var id = connection.QuerySingleOrDefault<int?>(
+            "SELECT Id FROM Fork WHERE Name = @Name",
+            new { Name = defaultName});
+
+        id ??= connection.QuerySingle<int>(
+            "INSERT INTO Fork (Name) VALUES (@Name) RETURNING Id",
+            new { Name = defaultName });
+
+        return id.Value;
     }
 }

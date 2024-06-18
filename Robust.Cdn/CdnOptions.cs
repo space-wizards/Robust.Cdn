@@ -6,6 +6,8 @@ public sealed class CdnOptions
 {
     public const string Position = "Cdn";
 
+    public string? DefaultFork { get; set; }
+
     /// <summary>
     /// Directory path where new version zips are read from stored. See docs site for details.
     /// </summary>

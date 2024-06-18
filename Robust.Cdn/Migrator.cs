@@ -9,7 +9,7 @@ namespace Robust.Cdn;
 /// </summary>
 public sealed class Migrator
 {
-    internal static bool Migrate(ILogger logger, SqliteConnection connection, string prefix)
+    internal static bool Migrate(IServiceProvider services, ILogger logger, SqliteConnection connection, string prefix)
     {
         logger.LogDebug("Migrating with prefix {Prefix}", prefix);
 
@@ -38,9 +38,10 @@ public sealed class Migrator
 
             try
             {
-                var code = script.Up(connection);
+                var code = script.Up(services, connection);
 
-                connection.Execute(code);
+                if (!string.IsNullOrWhiteSpace(code))
+                    connection.Execute(code);
 
                 connection.Execute(
                     "INSERT INTO SchemaVersions(ScriptName, Applied) VALUES (@Script, datetime('now'))",
@@ -98,7 +99,7 @@ public sealed class Migrator
 
     public interface IMigrationScript
     {
-        string Up(SqliteConnection connection);
+        string Up(IServiceProvider services, SqliteConnection connection);
     }
 
     private sealed class FileMigrationScript : IMigrationScript
@@ -107,6 +108,6 @@ public sealed class Migrator
 
         public FileMigrationScript(string code) => _code = code;
 
-        public string Up(SqliteConnection connection) => _code;
+        public string Up(IServiceProvider services, SqliteConnection connection) => _code;
     }
 }

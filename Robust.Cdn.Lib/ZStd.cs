@@ -1,12 +1,14 @@
 ﻿using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Runtime.Serialization;
 using SharpZstd.Interop;
 using static SharpZstd.Interop.Zstd;
 
-namespace Robust.Cdn.Helpers;
+[assembly: InternalsVisibleTo("Robust.Cdn")]
 
-public static class ZStd
+namespace Robust.Cdn.Lib;
+
+internal static class ZStd
 {
     public static int CompressBound(int length)
     {
@@ -22,6 +24,19 @@ public static class ZStd
         fixed (byte* src = data)
         {
             var result = ZSTD_compress(dst, (nuint)into.Length, src, (nuint)data.Length, compressionLevel);
+            ZStdException.ThrowIfError(result);
+            return (int)result;
+        }
+    }
+
+    public static unsafe int Decompress(
+        Span<byte> into,
+        ReadOnlySpan<byte> data)
+    {
+        fixed (byte* dst = into)
+        fixed (byte* src = data)
+        {
+            var result = ZSTD_decompress(dst, (nuint)into.Length, src, (nuint)data.Length);
             ZStdException.ThrowIfError(result);
             return (int)result;
         }

@@ -50,7 +50,10 @@ app.Lifetime.ApplicationStopped.Register(SqliteConnection.ClearAllPools);
     loggerStartup.LogDebug("Running migrations!");
     var loggerMigrator = logFactory.CreateLogger<Migrator>();
 
-    Migrator.Migrate(loggerMigrator, db, "Robust.Cdn.Migrations");
+    var success = Migrator.Migrate(services, loggerMigrator, db, "Robust.Cdn.Migrations");
+    if (!success)
+        throw new Exception("Failed to apply migrations. Fuck!");
+
     loggerStartup.LogDebug("Done running migrations!");
 }
 /*

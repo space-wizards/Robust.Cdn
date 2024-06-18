@@ -22,4 +22,8 @@
     <EmbeddedResource Include="Migrations\*.sql" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Robust.Cdn.Lib\Robust.Cdn.Lib.csproj" />
+  </ItemGroup>
+
 </Project>
