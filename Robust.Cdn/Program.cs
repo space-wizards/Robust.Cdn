@@ -52,10 +52,6 @@ app.Lifetime.ApplicationStopped.Register(SqliteConnection.ClearAllPools);
 
     Migrator.Migrate(loggerMigrator, db, "Robust.Cdn.Migrations");
     loggerStartup.LogDebug("Done running migrations!");
-
-    Migrator.Migrate(loggerMigrator, db, "Robust.Cdn.Migrations");
-    loggerStartup.LogDebug("Done running migrations!");
-
 }
 /*
 // Configure the HTTP request pipeline.
