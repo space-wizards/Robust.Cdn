@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Robust.Cdn.Helpers;
 using Robust.Cdn.Lib;
 using Robust.Cdn.Services;
+using SharpZstd;
 using SharpZstd.Interop;
 using SQLitePCL;
 
@@ -63,7 +64,7 @@ public sealed class DownloadController(
             return File(blob, "text/plain");
         }
 
-        var decompress = new ZStdDecompressStream(blob);
+        var decompress = new ZstdDecodeStream(blob, leaveOpen: false);
 
         return File(decompress, "text/plain");
     }
@@ -174,8 +175,8 @@ public sealed class DownloadController(
 
         if (doStreamCompression)
         {
-            var zStdCompressStream = new ZStdCompressStream(outStream);
-            zStdCompressStream.Context.SetParameter(
+            var zStdCompressStream = new ZstdEncodeStream(outStream, leaveOpen: false);
+            zStdCompressStream.Encoder.SetParameter(
                 ZSTD_cParameter.ZSTD_c_compressionLevel,
                 _options.StreamCompressLevel);
 
