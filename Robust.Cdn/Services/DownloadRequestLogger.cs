@@ -8,7 +8,6 @@ namespace Robust.Cdn.Services;
 
 public sealed class DownloadRequestLogger : BackgroundService
 {
-    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptions<CdnOptions> _options;
     private readonly ILogger<DownloadRequestLogger> _logger;
     private readonly ChannelReader<RequestLog> _channelReader;
@@ -19,7 +18,6 @@ public sealed class DownloadRequestLogger : BackgroundService
         IOptions<CdnOptions> options,
         ILogger<DownloadRequestLogger> logger)
     {
-        _scopeFactory = scopeFactory;
         _options = options;
         _logger = logger;
 
@@ -43,7 +41,10 @@ public sealed class DownloadRequestLogger : BackgroundService
             {
                 var storage = _options.Value.LogRequestStorage;
                 if (storage == RequestLogStorage.Database)
-                    WriteLogsDatabase();
+                {
+                    _logger.LogWarning("Database request logging has been removed");
+                    break;
+                }
                 else if (storage == RequestLogStorage.Console)
                     WriteLogsConsole();
                 else
@@ -56,62 +57,6 @@ public sealed class DownloadRequestLogger : BackgroundService
         }
 
         // ReSharper disable once FunctionNeverReturns
-    }
-
-    private void WriteLogsDatabase()
-    {
-        using var scope = _scopeFactory.CreateScope();
-
-        var connection = scope.ServiceProvider.GetRequiredService<Database>().Connection;
-        using var transaction = connection.BeginTransaction();
-
-        var countWritten = 0;
-        while (_channelReader.TryRead(out var entry))
-        {
-            var hash = CryptoGenericHashBlake2B.Hash(32, entry.RequestData.Span, ReadOnlySpan<byte>.Empty);
-            var blobRowId = connection.QuerySingleOrDefault<long>("SELECT Id FROM RequestLogBlob WHERE Hash = @Hash",
-                new
-                {
-                    Hash = hash
-                });
-
-            if (blobRowId == 0)
-            {
-                blobRowId = connection.ExecuteScalar<long>(
-                    "INSERT INTO RequestLogBlob (Hash, Data) VALUES (@Hash, zeroblob(@DataSize)) RETURNING Id",
-                    new
-                    {
-                        Hash = hash,
-                        DataSize = entry.RequestData.Length
-                    });
-
-                using var blob = SqliteBlobStream.Open(
-                    connection.Handle!,
-                    "main", "RequestLogBlob", "Data",
-                    blobRowId,
-                    true);
-
-                blob.Write(entry.RequestData.Span);
-            }
-
-            connection.Execute(
-                "INSERT INTO RequestLog (Time, Compression, Protocol, BytesSent, VersionId, BlobId) " +
-                "VALUES (@Time, @Compression, @Protocol, @BytesSent, @VersionId, @BlobId)",
-                new
-                {
-                    entry.Time,
-                    entry.Compression,
-                    entry.Protocol,
-                    entry.VersionId,
-                    entry.BytesSent,
-                    BlobId = blobRowId
-                });
-
-            countWritten += 1;
-        }
-
-        transaction.Commit();
-        _logger.LogDebug("Wrote {CountWritten} log entries to disk", countWritten);
     }
 
     private void WriteLogsConsole()
