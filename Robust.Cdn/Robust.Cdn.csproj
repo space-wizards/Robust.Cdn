@@ -13,6 +13,9 @@
     <!--<PackageReference Include="Swashbuckle.AspNetCore" />-->
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="Dapper" />
+    <PackageReference Include="Quartz" />
+    <PackageReference Include="Quartz.Extensions.DependencyInjection" />
+    <PackageReference Include="Quartz.Extensions.Hosting" />
     <PackageReference Include="SpaceWizards.Sodium" />
     <PackageReference Include="SharpZstd.Interop" />
   </ItemGroup>

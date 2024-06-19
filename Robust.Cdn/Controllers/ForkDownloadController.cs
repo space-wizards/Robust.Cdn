@@ -5,6 +5,7 @@ using Dapper;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Robust.Cdn.Config;
 using Robust.Cdn.Helpers;
 using Robust.Cdn.Lib;
 using Robust.Cdn.Services;

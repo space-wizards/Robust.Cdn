@@ -1,7 +1,10 @@
 using Dapper;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
+using Quartz;
 using Robust.Cdn;
+using Robust.Cdn.Config;
+using Robust.Cdn.Jobs;
 using Robust.Cdn.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -10,13 +13,21 @@ builder.Host.UseSystemd();
 // Add services to the container.
 
 builder.Services.Configure<CdnOptions>(builder.Configuration.GetSection(CdnOptions.Position));
+builder.Services.Configure<ManifestOptions>(builder.Configuration.GetSection(ManifestOptions.Position));
 
 builder.Services.AddControllers();
-builder.Services.AddSingleton<DataLoader>();
-builder.Services.AddHostedService(services => services.GetRequiredService<DataLoader>());
 builder.Services.AddSingleton<DownloadRequestLogger>();
 builder.Services.AddHostedService(services => services.GetRequiredService<DownloadRequestLogger>());
 builder.Services.AddTransient<Database>();
+builder.Services.AddQuartz(q =>
+{
+    q.AddJob<IngestNewCdnContentJob>(j => j.WithIdentity(IngestNewCdnContentJob.Key).StoreDurably());
+});
+
+builder.Services.AddQuartzHostedService(q =>
+{
+    q.WaitForJobsToComplete = true;
+});
 
 /*
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -34,13 +45,19 @@ app.Lifetime.ApplicationStopped.Register(SqliteConnection.ClearAllPools);
     var services = initScope.ServiceProvider;
     var logFactory = services.GetRequiredService<ILoggerFactory>();
     var loggerStartup = logFactory.CreateLogger("Robust.Cdn.Program");
-    var options = services.GetRequiredService<IOptions<CdnOptions>>().Value;
+    var manifestOptions = services.GetRequiredService<IOptions<ManifestOptions>>().Value;
     var db = services.GetRequiredService<Database>().Connection;
 
-    if (string.IsNullOrEmpty(options.VersionDiskPath))
+    if (string.IsNullOrEmpty(manifestOptions.FileDiskPath))
     {
-        loggerStartup.LogCritical("version disk path not set in configuration!");
-        return;
+        loggerStartup.LogCritical("Manifest.FileDiskPath not set in configuration!");
+        return 1;
+    }
+
+    if (manifestOptions.Forks.Count == 0)
+    {
+        loggerStartup.LogCritical("No forks defined in Manifest configuration!");
+        return 1;
     }
 
     db.Open();
@@ -52,9 +69,15 @@ app.Lifetime.ApplicationStopped.Register(SqliteConnection.ClearAllPools);
 
     var success = Migrator.Migrate(services, loggerMigrator, db, "Robust.Cdn.Migrations");
     if (!success)
-        throw new Exception("Failed to apply migrations. Fuck!");
+        return 1;
 
     loggerStartup.LogDebug("Done running migrations!");
+
+    var scheduler = await initScope.ServiceProvider.GetRequiredService<ISchedulerFactory>().GetScheduler();
+    foreach (var fork in manifestOptions.Forks.Keys)
+    {
+        await scheduler.TriggerJob(IngestNewCdnContentJob.Key, IngestNewCdnContentJob.Data(fork));
+    }
 }
 /*
 // Configure the HTTP request pipeline.
@@ -71,4 +94,6 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-app.Run();
+await app.RunAsync();
+
+return 0;

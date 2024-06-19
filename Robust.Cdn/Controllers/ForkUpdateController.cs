@@ -2,25 +2,26 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
-using Robust.Cdn.Services;
+using Quartz;
+using Robust.Cdn.Config;
+using Robust.Cdn.Jobs;
 
 namespace Robust.Cdn.Controllers;
 
 [ApiController]
-public sealed class UpdateController : ControllerBase
+[Route("/fork/{fork}")]
+public sealed class UpdateController(
+    IOptions<ManifestOptions> options,
+    ISchedulerFactory schedulerFactory) : ControllerBase
 {
-    private readonly DataLoader _loader;
-    private readonly CdnOptions _options;
-
-    public UpdateController(IOptionsSnapshot<CdnOptions> options, DataLoader loader)
-    {
-        _loader = loader;
-        _options = options.Value;
-    }
+    private readonly ManifestOptions _options = options.Value;
 
     [HttpPost("control/update")]
-    public async Task<IActionResult> PostControlUpdate()
+    public async Task<IActionResult> PostControlUpdate(string fork)
     {
+        if (!_options.Forks.TryGetValue(fork, out var forkConfig))
+            return NotFound();
+
         var authHeader = Request.Headers.Authorization;
 
         if (authHeader.Count == 0)
@@ -34,11 +35,13 @@ public sealed class UpdateController : ControllerBase
 
         var token = auth["Bearer ".Length..];
 
-        var matches = StringsEqual(token, _options.UpdateToken);
+        var matches = StringsEqual(token, forkConfig.UpdateToken);
         if (!matches)
             return Unauthorized("Incorrect token");
 
-        await _loader.QueueUpdateVersions();
+        var scheduler = await schedulerFactory.GetScheduler();
+        await scheduler.TriggerJob(IngestNewCdnContentJob.Key, IngestNewCdnContentJob.Data(fork));
+
         return Accepted();
     }
 

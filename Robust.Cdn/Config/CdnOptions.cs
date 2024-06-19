@@ -1,17 +1,19 @@
 ﻿using Robust.Cdn.Services;
 
-namespace Robust.Cdn;
+namespace Robust.Cdn.Config;
 
 public sealed class CdnOptions
 {
     public const string Position = "Cdn";
 
-    public string? DefaultFork { get; set; }
-
     /// <summary>
-    /// Directory path where new version zips are read from stored. See docs site for details.
+    /// Backwards-compatibility "default" fork value for content stored by an older version of <c>Robust.Cdn</c>.
     /// </summary>
-    public string VersionDiskPath { get; set; } = "";
+    /// <remarks>
+    /// When migrating a content database from an older version, this fork name will be assigned to existing content.
+    /// Furthermore, the old <c>/version</c> endpoint will use this fork as the one to look up.
+    /// </remarks>
+    public string? DefaultFork { get; set; }
 
     /// <summary>
     /// File path for the database to store files, versions and logs into.
@@ -81,9 +83,4 @@ public sealed class CdnOptions
     /// Log download requests to database or console
     /// </summary>
     public RequestLogStorage LogRequestStorage { get; set; } = RequestLogStorage.Database;
-
-    /// <summary>
-    /// Authentication token to initiate version updates via the POST /control/update endpoint.
-    /// </summary>
-    public string UpdateToken { get; set; } = "CHANGE ME";
 }

@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Robust.Cdn.Config;
 
 namespace Robust.Cdn.Controllers;
 
