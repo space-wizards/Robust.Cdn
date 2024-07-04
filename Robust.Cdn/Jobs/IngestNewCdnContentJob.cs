@@ -18,6 +18,7 @@ public sealed class IngestNewCdnContentJob(
     Database cdnDatabase,
     IOptions<CdnOptions> cdnOptions,
     IOptions<ManifestOptions> manifestOptions,
+    ISchedulerFactory schedulerFactory,
     ILogger<IngestNewCdnContentJob> logger) : IJob
 {
     public static readonly JobKey Key = new(nameof(IngestNewCdnContentJob));
@@ -28,20 +29,63 @@ public sealed class IngestNewCdnContentJob(
         { KeyForkName, fork }
     };
 
-    public Task Execute(IJobExecutionContext context)
+    public async Task Execute(IJobExecutionContext context)
     {
         var fork = context.MergedJobDataMap.GetString(KeyForkName) ?? throw new InvalidDataException();
 
         logger.LogInformation("Ingesting new versions for fork: {Fork}", fork);
 
-        var cdnOpts = cdnOptions.Value;
+        var forkConfig = manifestOptions.Value.Forks[fork];
+
         var connection = cdnDatabase.Connection;
         var transaction = connection.BeginTransaction();
 
-        var newVersions = FindNewVersions(fork, connection);
+        List<string> newVersions;
+        try
+        {
+            newVersions = FindNewVersions(fork, connection);
 
-        if (newVersions.Count == 0)
-            return Task.CompletedTask;
+            if (newVersions.Count == 0)
+                return;
+
+            IngestNewVersions(
+                fork,
+                connection,
+                newVersions,
+                ref transaction,
+                forkConfig,
+                context.CancellationToken);
+
+            logger.LogDebug("Committing database");
+
+            transaction.Commit();
+        }
+        finally
+        {
+            transaction.Dispose();
+        }
+
+        await QueueManifestAvailable(fork, newVersions);
+    }
+
+    private async Task QueueManifestAvailable(string fork, IEnumerable<string> newVersions)
+    {
+        var scheduler = await schedulerFactory.GetScheduler();
+        await scheduler.TriggerJob(
+            MakeNewManifestVersionsAvailableJob.Key,
+            MakeNewManifestVersionsAvailableJob.Data(fork, newVersions));
+    }
+
+    private void IngestNewVersions(
+        string fork,
+        SqliteConnection connection,
+        List<string> newVersions,
+        ref SqliteTransaction transaction,
+        ManifestForkOptions forkConfig,
+        CancellationToken cancel)
+    {
+        var cdnOpts = cdnOptions.Value;
+        var manifestOpts = manifestOptions.Value;
 
         var forkId = EnsureForkCreated(fork, connection);
 
@@ -79,7 +123,7 @@ public sealed class IngestNewCdnContentJob(
                     transaction = connection.BeginTransaction();
                 }
 
-                context.CancellationToken.ThrowIfCancellationRequested();
+                cancel.ThrowIfCancellationRequested();
 
                 logger.LogInformation("Ingesting new version: {Version}", version);
 
@@ -92,10 +136,10 @@ public sealed class IngestNewCdnContentJob(
                 stmtInsertContentManifestEntry.BindInt64(1, versionId);
 
                 var zipFilePath = Path.Combine(
-                    manifestOptions.Value.FileDiskPath,
+                    manifestOpts.FileDiskPath,
                     fork,
                     version,
-                    cdnOpts.ClientZipName);
+                    forkConfig.ClientZipName + ".zip");
 
                 using var zipFile = ZipFile.OpenRead(zipFilePath);
 
@@ -109,7 +153,7 @@ public sealed class IngestNewCdnContentJob(
                 var idx = 0;
                 foreach (var entry in zipFile.Entries.OrderBy(e => e.FullName, StringComparer.Ordinal))
                 {
-                    context.CancellationToken.ThrowIfCancellationRequested();
+                    cancel.ThrowIfCancellationRequested();
 
                     // Ignore directory entries.
                     if (entry.Name == "")
@@ -287,12 +331,6 @@ public sealed class IngestNewCdnContentJob(
             ArrayPool<byte>.Shared.Return(readBuffer);
             ArrayPool<byte>.Shared.Return(compressBuffer);
         }
-
-        logger.LogDebug("Committing database");
-
-        transaction.Commit();
-
-        return Task.CompletedTask;
     }
 
     private List<string> FindNewVersions(string fork, SqliteConnection con)
@@ -323,7 +361,9 @@ public sealed class IngestNewCdnContentJob(
                 continue;
             }
 
-            if (!File.Exists(Path.Combine(versionDirectory, cdnOptions.Value.ClientZipName)))
+            var clientZipName = manifestOptions.Value.Forks[fork].ClientZipName + ".zip";
+
+            if (!File.Exists(Path.Combine(versionDirectory, clientZipName)))
             {
                 logger.LogWarning("On-disk version is missing client zip: {Version}", version);
                 continue;

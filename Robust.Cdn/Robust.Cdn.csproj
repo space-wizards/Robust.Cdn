@@ -23,6 +23,7 @@
   <ItemGroup>
     <None Remove="Migrations\*.sql" />
     <EmbeddedResource Include="Migrations\*.sql" />
+    <EmbeddedResource Include="ManifestMigrations\*.sql" />
   </ItemGroup>
 
   <ItemGroup>

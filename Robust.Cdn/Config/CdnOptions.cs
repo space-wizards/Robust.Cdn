@@ -21,11 +21,6 @@ public sealed class CdnOptions
     public string DatabaseFileName { get; set; } = "content.db";
 
     /// <summary>
-    /// The name of client zip files in the directory structure.
-    /// </summary>
-    public string ClientZipName { get; set; } = "SS14.Client.zip";
-
-    /// <summary>
     /// Whether to do stream compression over whole download requests.
     /// Ignored if AutoStreamCompressRatio is used.
     /// </summary>
