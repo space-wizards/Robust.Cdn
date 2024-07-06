@@ -242,7 +242,7 @@ public sealed partial class ForkPublishController(
         var manifest = new MemoryStream();
         var writer = new StreamWriter(manifest, new UTF8Encoding(false), leaveOpen: true);
 
-        writer.Write("Robust Content Manifeset 1\n");
+        writer.Write("Robust Content Manifest 1\n");
 
         foreach (var entry in zip.Entries.OrderBy(e => e.FullName, StringComparer.Ordinal))
         {
