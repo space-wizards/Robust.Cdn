@@ -50,7 +50,7 @@ public sealed class ForkManifestController(ManifestDatabase database, IOptions<M
             WHERE ForkVersion.Name = @Version
               AND Fork.Name = @Fork
               AND Fork.Id = ForkVersion.ForkId
-            """);
+            """, new { Fork = fork, Version = version });
 
         if (!versionExists)
             return NotFound();
