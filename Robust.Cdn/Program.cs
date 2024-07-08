@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using Quartz;
@@ -36,8 +37,16 @@ builder.Services.AddQuartzHostedService(q =>
     q.WaitForJobsToComplete = true;
 });
 
-builder.Services.AddHttpClient(ForkPublishController.PublishFetchHttpClient);
-builder.Services.AddHttpClient(NotifyWatchdogUpdateJob.HttpClientName);
+const string userAgent = "Robust.Cdn";
+
+builder.Services.AddHttpClient(ForkPublishController.PublishFetchHttpClient, c =>
+{
+    c.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(userAgent, null));
+});
+builder.Services.AddHttpClient(NotifyWatchdogUpdateJob.HttpClientName, c =>
+{
+    c.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(userAgent, null));
+});
 
 builder.Services.AddScoped<BaseUrlManager>();
 builder.Services.AddScoped<ForkAuthHelper>();
