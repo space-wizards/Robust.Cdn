@@ -24,4 +24,13 @@ public sealed class ManifestForkOptions
     public string ClientZipName { get; set; } = "SS14.Client";
 
     public string ServerZipName { get; set; } = "SS14.Server_";
+
+    public ManifestForkNotifyWatchdog[] NotifyWatchdogs { get; set; } = [];
+}
+
+public sealed class ManifestForkNotifyWatchdog
+{
+    public required string WatchdogUrl { get; set; }
+    public required string Instance { get; set; }
+    public required string ApiToken { get; set; }
 }

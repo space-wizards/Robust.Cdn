@@ -8,6 +8,7 @@ namespace Robust.Cdn.Jobs;
 public sealed class MakeNewManifestVersionsAvailableJob(
     ManifestDatabase database,
     BaseUrlManager baseUrlManager,
+    ISchedulerFactory schedulerFactory,
     ILogger<MakeNewManifestVersionsAvailableJob> logger) : IJob
 {
     private static readonly JsonSerializerOptions ManifestCacheContext = new()
@@ -26,7 +27,7 @@ public sealed class MakeNewManifestVersionsAvailableJob(
         { KeyVersions, versions.ToArray() },
     };
 
-    public Task Execute(IJobExecutionContext context)
+    public async Task Execute(IJobExecutionContext context)
     {
         var fork = context.MergedJobDataMap.GetString(KeyForkName) ?? throw new InvalidDataException();
         var versions = (string[])context.MergedJobDataMap.Get(KeyVersions) ?? throw new InvalidDataException();
@@ -50,7 +51,7 @@ public sealed class MakeNewManifestVersionsAvailableJob(
 
         UpdateServerManifestCache(fork, forkId);
 
-        return Task.CompletedTask;
+        await QueueNotifyWatchdogUpdate(fork);
     }
 
     private void MakeVersionsAvailable(int forkId, IEnumerable<string> versions)
@@ -132,6 +133,14 @@ public sealed class MakeNewManifestVersionsAvailableJob(
         }
 
         return data;
+    }
+
+    private async Task QueueNotifyWatchdogUpdate(string fork)
+    {
+        var scheduler = await schedulerFactory.GetScheduler();
+        await scheduler.TriggerJob(
+            NotifyWatchdogUpdateJob.Key,
+            NotifyWatchdogUpdateJob.Data(fork));
     }
 
     private sealed class ManifestData

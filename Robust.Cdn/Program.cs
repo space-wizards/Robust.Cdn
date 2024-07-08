@@ -28,6 +28,7 @@ builder.Services.AddQuartz(q =>
     {
         j.WithIdentity(MakeNewManifestVersionsAvailableJob.Key).StoreDurably();
     });
+    q.AddJob<NotifyWatchdogUpdateJob>(j => j.WithIdentity(NotifyWatchdogUpdateJob.Key).StoreDurably());
 });
 
 builder.Services.AddQuartzHostedService(q =>
@@ -36,6 +37,7 @@ builder.Services.AddQuartzHostedService(q =>
 });
 
 builder.Services.AddHttpClient(ForkPublishController.PublishFetchHttpClient);
+builder.Services.AddHttpClient(NotifyWatchdogUpdateJob.HttpClientName);
 
 builder.Services.AddScoped<BaseUrlManager>();
 builder.Services.AddScoped<ForkAuthHelper>();
