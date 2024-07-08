@@ -9,6 +9,5 @@
   <ItemGroup>
     <PackageReference Include="SharpZstd.Interop" />
     <PackageReference Include="SharpZstd" />
-    <PackageReference Include="System.CommandLine" />
   </ItemGroup>
 </Project>

@@ -9,6 +9,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\Robust.Cdn.Lib\Robust.Cdn.Lib.csproj" />
+      <PackageReference Include="System.CommandLine" />
     </ItemGroup>
 
 </Project>
