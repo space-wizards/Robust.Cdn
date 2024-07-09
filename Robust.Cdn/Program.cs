@@ -18,6 +18,7 @@ builder.Services.Configure<CdnOptions>(builder.Configuration.GetSection(CdnOptio
 builder.Services.Configure<ManifestOptions>(builder.Configuration.GetSection(ManifestOptions.Position));
 
 builder.Services.AddControllers();
+builder.Services.AddScoped<BuildDirectoryManager>();
 builder.Services.AddSingleton<DownloadRequestLogger>();
 builder.Services.AddHostedService(services => services.GetRequiredService<DownloadRequestLogger>());
 builder.Services.AddTransient<Database>();
@@ -30,6 +31,11 @@ builder.Services.AddQuartz(q =>
         j.WithIdentity(MakeNewManifestVersionsAvailableJob.Key).StoreDurably();
     });
     q.AddJob<NotifyWatchdogUpdateJob>(j => j.WithIdentity(NotifyWatchdogUpdateJob.Key).StoreDurably());
+    q.AddJob<UpdateForkManifestJob>(j => j.WithIdentity(UpdateForkManifestJob.Key).StoreDurably());
+    q.ScheduleJob<PruneOldManifestBuilds>(trigger => trigger.WithSimpleSchedule(schedule =>
+    {
+        schedule.RepeatForever().WithIntervalInHours(24);
+    }));
 });
 
 builder.Services.AddQuartzHostedService(q =>

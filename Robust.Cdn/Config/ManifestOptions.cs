@@ -30,6 +30,15 @@ public sealed class ManifestForkOptions
     public bool Private { get; set; } = false;
 
     public Dictionary<string, string> PrivateUsers { get; set; } = new();
+
+    /// <summary>
+    /// If set to a value other than 0, old manifest versions will be automatically deleted after this many days.
+    /// </summary>
+    /// <remarks>
+    /// This does not delete these old versions from the client CDN, only the server manifest.
+    /// This is seen as acceptable as those generally don't take too much space.
+    /// </remarks>
+    public int PruneBuildsDays { get; set; } = 90;
 }
 
 public sealed class ManifestForkNotifyWatchdog

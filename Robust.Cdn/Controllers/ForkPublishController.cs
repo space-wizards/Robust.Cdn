@@ -41,6 +41,7 @@ public sealed partial class ForkPublishController(
     ManifestDatabase manifestDatabase,
     ISchedulerFactory schedulerFactory,
     BaseUrlManager baseUrlManager,
+    BuildDirectoryManager buildDirectoryManager,
     ILogger<ForkPublishController> logger)
     : ControllerBase
 {
@@ -89,7 +90,7 @@ public sealed partial class ForkPublishController(
         if (clientArtifact == null)
             return BadRequest("Client zip is missing!");
 
-        var versionDir = Path.Combine(manifestOptions.Value.FileDiskPath, fork, request.Version);
+        var versionDir = buildDirectoryManager.GetBuildVersionPath(fork, request.Version);
 
         try
         {
@@ -314,7 +315,7 @@ public sealed partial class ForkPublishController(
 
         var versionId = dbCon.QuerySingle<int>("""
             INSERT INTO ForkVersion (Name, ForkId, PublishedTime, ClientFileName, ClientSha256, EngineVersion)
-            VALUES (@Name, @ForkId, DATETIME('now'), @ClientName, @ClientSha256, @EngineVersion)
+            VALUES (@Name, @ForkId, @PublishTime, @ClientName, @ClientSha256, @EngineVersion)
             RETURNING Id
             """,
             new
@@ -323,7 +324,8 @@ public sealed partial class ForkPublishController(
                 ForkId = forkId,
                 ClientName = clientName,
                 ClientSha256 = clientSha256,
-                request.EngineVersion
+                request.EngineVersion,
+                PublishTime = DateTime.UtcNow
             });
 
         foreach (var (artifact, diskPath) in diskFiles)

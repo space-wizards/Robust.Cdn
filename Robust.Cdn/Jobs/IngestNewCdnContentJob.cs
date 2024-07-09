@@ -19,6 +19,7 @@ public sealed class IngestNewCdnContentJob(
     IOptions<CdnOptions> cdnOptions,
     IOptions<ManifestOptions> manifestOptions,
     ISchedulerFactory schedulerFactory,
+    BuildDirectoryManager buildDirectoryManager,
     ILogger<IngestNewCdnContentJob> logger) : IJob
 {
     public static readonly JobKey Key = new(nameof(IngestNewCdnContentJob));
@@ -135,8 +136,7 @@ public sealed class IngestNewCdnContentJob(
 
                 stmtInsertContentManifestEntry.BindInt64(1, versionId);
 
-                var zipFilePath = Path.Combine(
-                    manifestOpts.FileDiskPath,
+                var zipFilePath = buildDirectoryManager.GetBuildVersionFilePath(
                     fork,
                     version,
                     forkConfig.ClientZipName + ".zip");
@@ -339,7 +339,7 @@ public sealed class IngestNewCdnContentJob(
 
         var newVersions = new List<(string, DateTime)>();
 
-        var dir = Path.Combine(manifestOptions.Value.FileDiskPath, fork);
+        var dir = buildDirectoryManager.GetForkPath(fork);
         if (!Directory.Exists(dir))
             return [];
 

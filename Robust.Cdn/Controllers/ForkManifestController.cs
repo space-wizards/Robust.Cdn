@@ -14,7 +14,10 @@ namespace Robust.Cdn.Controllers;
 /// </summary>
 [ApiController]
 [Route("/fork/{fork}")]
-public sealed class ForkManifestController(ManifestDatabase database, IOptions<ManifestOptions> manifestOptions)
+public sealed class ForkManifestController(
+    ManifestDatabase database,
+    BuildDirectoryManager buildDirectoryManager,
+    IOptions<ManifestOptions> manifestOptions)
     : ControllerBase
 {
     [HttpGet("manifest")]
@@ -66,11 +69,7 @@ public sealed class ForkManifestController(ManifestDatabase database, IOptions<M
         if (!versionExists)
             return NotFound();
 
-        var disk = Path.Combine(
-            Path.GetFullPath(manifestOptions.Value.FileDiskPath),
-            fork,
-            version,
-            file);
+        var disk = buildDirectoryManager.GetBuildVersionFilePath(fork, version, file);
 
         return PhysicalFile(disk, MediaTypeNames.Application.Zip);
     }
