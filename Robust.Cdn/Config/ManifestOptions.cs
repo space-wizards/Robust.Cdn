@@ -26,6 +26,10 @@ public sealed class ManifestForkOptions
     public string ServerZipName { get; set; } = "SS14.Server_";
 
     public ManifestForkNotifyWatchdog[] NotifyWatchdogs { get; set; } = [];
+
+    public bool Private { get; set; } = false;
+
+    public Dictionary<string, string> PrivateUsers { get; set; } = new();
 }
 
 public sealed class ManifestForkNotifyWatchdog
