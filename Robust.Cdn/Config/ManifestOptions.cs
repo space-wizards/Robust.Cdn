@@ -39,6 +39,10 @@ public sealed class ManifestForkOptions
     /// This is seen as acceptable as those generally don't take too much space.
     /// </remarks>
     public int PruneBuildsDays { get; set; } = 90;
+
+    public string? DisplayName { get; set; }
+    public string? BuildsPageLink { get; set; }
+    public string? BuildsPageLinkText { get; set; }
 }
 
 public sealed class ManifestForkNotifyWatchdog

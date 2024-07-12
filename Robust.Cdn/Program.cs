@@ -17,7 +17,7 @@ builder.Host.UseSystemd();
 builder.Services.Configure<CdnOptions>(builder.Configuration.GetSection(CdnOptions.Position));
 builder.Services.Configure<ManifestOptions>(builder.Configuration.GetSection(ManifestOptions.Position));
 
-builder.Services.AddControllers();
+builder.Services.AddControllersWithViews();
 builder.Services.AddScoped<BuildDirectoryManager>();
 builder.Services.AddSingleton<DownloadRequestLogger>();
 builder.Services.AddHostedService(services => services.GetRequiredService<DownloadRequestLogger>());

@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Text.Json.Serialization;
 using Dapper;
 using Quartz;
 using Robust.Cdn.Helpers;
@@ -87,18 +88,19 @@ public sealed class UpdateForkManifestJob(
                 Server = new Dictionary<string, ManifestArtifact>()
             };
 
-            var servers = database.Connection.Query<(string platform, string fileName, byte[] sha256)>("""
-                SELECT Platform, FileName, Sha256
+            var servers = database.Connection.Query<(string platform, string fileName, byte[] sha256, long? size)>("""
+                SELECT Platform, FileName, Sha256, FileSize
                 FROM ForkVersionServerBuild
                 WHERE ForkVersionId = @ForkVersionId
                 """, new { ForkVersionId = version.id });
 
-            foreach (var (platform, fileName, sha256) in servers)
+            foreach (var (platform, fileName, sha256, size) in servers)
             {
                 buildData.Server.Add(platform, new ManifestArtifact
                 {
                     Url = baseUrlManager.MakeBuildInfoUrl($"fork/{fork}/version/{version.name}/file/{fileName}"),
-                    Sha256 = Convert.ToHexString(sha256)
+                    Sha256 = Convert.ToHexString(sha256),
+                    Size = size
                 });
             }
 
@@ -132,5 +134,7 @@ public sealed class UpdateForkManifestJob(
     {
         public required string Url { get; set; }
         public required string Sha256 { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public long? Size { get; set; }
     }
 }

@@ -37,7 +37,6 @@ namespace Robust.Cdn.Controllers;
 public sealed partial class ForkPublishController(
     ForkAuthHelper authHelper,
     IHttpClientFactory httpFactory,
-    IOptions<ManifestOptions> manifestOptions,
     ManifestDatabase manifestDatabase,
     ISchedulerFactory schedulerFactory,
     BaseUrlManager baseUrlManager,
@@ -311,7 +310,7 @@ public sealed partial class ForkPublishController(
 
         var forkId = dbCon.QuerySingle<int>("SELECT Id FROM Fork WHERE Name = @Name", new { Name = fork });
 
-        var (clientName, clientSha256) = GetFileNameSha256Pair(diskFiles[clientArtifact]);
+        var (clientName, clientSha256, _) = GetFileNameSha256Pair(diskFiles[clientArtifact]);
 
         var versionId = dbCon.QuerySingle<int>("""
             INSERT INTO ForkVersion (Name, ForkId, PublishedTime, ClientFileName, ClientSha256, EngineVersion)
@@ -333,29 +332,30 @@ public sealed partial class ForkPublishController(
             if (artifact.Type != ArtifactType.Server)
                 continue;
 
-            var (serverName, serverSha256) = GetFileNameSha256Pair(diskPath);
+            var (serverName, serverSha256, fileSize) = GetFileNameSha256Pair(diskPath);
 
             dbCon.Execute("""
-                INSERT INTO ForkVersionServerBuild (ForkVersionId, Platform, FileName, Sha256)
-                VALUES (@ForkVersion, @Platform, @ServerName, @ServerSha256)
+                INSERT INTO ForkVersionServerBuild (ForkVersionId, Platform, FileName, Sha256, FileSize)
+                VALUES (@ForkVersion, @Platform, @ServerName, @ServerSha256, @FileSize)
                 """,
                 new
                 {
                     ForkVersion = versionId,
                     artifact.Platform,
                     ServerName = serverName,
-                    ServerSha256 = serverSha256
+                    ServerSha256 = serverSha256,
+                    FileSize = fileSize
                 });
         }
 
         tx.Commit();
     }
 
-    private static (string name, byte[] hash) GetFileNameSha256Pair(string diskPath)
+    private static (string name, byte[] hash, long size) GetFileNameSha256Pair(string diskPath)
     {
         using var file = System.IO.File.OpenRead(diskPath);
 
-        return (Path.GetFileName(diskPath), SHA256.HashData(file));
+        return (Path.GetFileName(diskPath), SHA256.HashData(file), file.Length);
     }
 
     private async Task QueueIngestJobAsync(string fork)

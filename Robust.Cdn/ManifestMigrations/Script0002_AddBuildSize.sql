@@ -1,0 +1,1 @@
+ALTER TABLE ForkVersionServerBuild ADD COLUMN FileSize INTEGER NULL;

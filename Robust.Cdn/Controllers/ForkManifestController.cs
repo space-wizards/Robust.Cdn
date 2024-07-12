@@ -21,9 +21,9 @@ public sealed class ForkManifestController(
     : ControllerBase
 {
     [HttpGet("manifest")]
-    public IActionResult GetManifest([FromHeader(Name = "Authorization")] string? authorization, string fork)
+    public IActionResult GetManifest(string fork)
     {
-        if (!TryCheckBasicAuth(authorization, fork, out var errorResult))
+        if (!TryCheckBasicAuth(fork, out var errorResult))
             return errorResult;
 
         var rowId = database.Connection.QuerySingleOrDefault<long>(
@@ -46,7 +46,6 @@ public sealed class ForkManifestController(
 
     [HttpGet("version/{version}/file/{file}")]
     public IActionResult GetFile(
-        [FromHeader(Name = "Authorization")] string? authorization,
         string fork,
         string version,
         string file)
@@ -55,7 +54,7 @@ public sealed class ForkManifestController(
         if (file.Contains('/') || file == ".." || file == ".")
             return BadRequest();
 
-        if (!TryCheckBasicAuth(authorization, fork, out var errorResult))
+        if (!TryCheckBasicAuth(fork, out var errorResult))
             return errorResult;
 
         var versionExists = database.Connection.QuerySingleOrDefault<bool>("""
@@ -75,13 +74,21 @@ public sealed class ForkManifestController(
     }
 
     private bool TryCheckBasicAuth(
-        string? authorization,
         string fork,
         [NotNullWhen(false)] out IActionResult? errorResult)
     {
-        if (!manifestOptions.Value.Forks.TryGetValue(fork, out var forkConfig))
+        return TryCheckBasicAuth(HttpContext, manifestOptions.Value, fork, out errorResult);
+    }
+
+    internal static bool TryCheckBasicAuth(
+        HttpContext httpContext,
+        ManifestOptions manifestOptions,
+        string fork,
+        [NotNullWhen(false)] out IActionResult? errorResult)
+    {
+        if (!manifestOptions.Forks.TryGetValue(fork, out var forkConfig))
         {
-            errorResult = NotFound("Fork does not exist");
+            errorResult = new NotFoundObjectResult("Fork does not exist");
             return false;
         }
 
@@ -91,34 +98,11 @@ public sealed class ForkManifestController(
             return true;
         }
 
-        if (authorization == null)
-        {
-            errorResult = new UnauthorizedResult();
-            return false;
-        }
-
-        if (!AuthorizationUtility.TryParseBasicAuthentication(
-                authorization,
-                out errorResult,
-                out var userName,
-                out var password))
-        {
-            return false;
-        }
-
-        if (!forkConfig.PrivateUsers.TryGetValue(userName, out var expectedPassword))
-        {
-            errorResult = new UnauthorizedResult();
-            return false;
-        }
-
-        if (!AuthorizationUtility.BasicAuthMatches(password, expectedPassword))
-        {
-            errorResult = new UnauthorizedResult();
-            return false;
-        }
-
-        errorResult = null;
-        return true;
+        return AuthorizationUtility.CheckBasicAuth(
+            httpContext,
+            $"fork_{fork}",
+            a => forkConfig.PrivateUsers.GetValueOrDefault(a),
+            out _,
+            out errorResult);
     }
 }

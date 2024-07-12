@@ -42,4 +42,54 @@ public static class AuthorizationUtility
             Encoding.UTF8.GetBytes(provided),
             Encoding.UTF8.GetBytes(expected));
     }
+
+    public static bool CheckBasicAuth(
+        HttpContext httpContext,
+        string realm,
+        Func<string, string?> getPassword,
+        [NotNullWhen(true)] out string? user,
+        [NotNullWhen(false)] out IActionResult? failure)
+    {
+        user = null;
+
+        if (!httpContext.Request.Headers.TryGetValue("Authorization", out var authValues))
+        {
+            SetWwwAuthenticate(httpContext, realm);
+            failure = new UnauthorizedResult();
+            return false;
+        }
+
+        var authValue = authValues[0]!;
+        if (!TryParseBasicAuthentication(
+                authValue,
+                out failure,
+                out user,
+                out var password))
+        {
+            SetWwwAuthenticate(httpContext, realm);
+            return false;
+        }
+
+        var expectedPassword = getPassword(user);
+        if (expectedPassword == null)
+        {
+            SetWwwAuthenticate(httpContext, realm);
+            failure = new UnauthorizedResult();
+            return false;
+        }
+
+        if (!BasicAuthMatches(password, expectedPassword))
+        {
+            SetWwwAuthenticate(httpContext, realm);
+            failure = new UnauthorizedResult();
+            return false;
+        }
+
+        return true;
+    }
+
+    private static void SetWwwAuthenticate(HttpContext context, string realm)
+    {
+        context.Response.Headers.WWWAuthenticate = $"Basic realm={realm}";
+    }
 }
