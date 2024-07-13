@@ -78,7 +78,7 @@ public sealed class ForkBuildPageController(
     {
         public required string Name;
         public required DateTime PublishedTime;
-        public required string EngineVersion;
+        public required string? EngineVersion;
         public required VersionServer[] Servers;
     }
 
@@ -94,6 +94,6 @@ public sealed class ForkBuildPageController(
         public required int Id { get; set; }
         public required string Name { get; set; }
         public required DateTime PublishedTime { get; set; }
-        public required string EngineVersion { get; set; }
+        public required string? EngineVersion { get; set; }
     }
 }

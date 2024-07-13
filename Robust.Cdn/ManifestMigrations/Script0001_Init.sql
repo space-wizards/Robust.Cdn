@@ -28,7 +28,8 @@ CREATE TABLE ForkVersion(
     ClientSha256 BLOB NOT NULL,
 
     -- Not strictly necessary, but I'll save it here anyways.
-    EngineVersion TEXT NOT NULL,
+    -- NULL for old imported builds before this value was tracked.
+    EngineVersion TEXT NULL,
 
     -- Whether this version is available for servers to download.
     -- This is updated after CDN content ingestion finishes.

@@ -33,8 +33,11 @@
                 <dd><span class="versionNumber">@version.Name</span></dd>
                 <dt>Date:</dt>
                 <dd><time datetime="@version.PublishedTime.ToString("O")">@version.PublishedTime.ToString("f") UTC</time></dd>
-                <dt>Engine Version:</dt>
-                <dd><span class="versionNumber">@version.EngineVersion</span></dd>
+                @if (version.EngineVersion is { } engineVersion)
+                {
+                    <dt>Engine Version:</dt>
+                    <dd><span class="versionNumber">@engineVersion</span></dd>
+                }
             </dl>
             <h3>Download</h3>
             <ul class="build-download-list">
