@@ -1,14 +1,17 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Robust.Cdn.Config;
+using Robust.Cdn.Services;
 
 namespace Robust.Cdn.Controllers;
 
 [ApiController]
 [Route("/version/{version}")]
 public sealed class DownloadCompatibilityController(
-    DownloadController downloadController,
-    IOptions<CdnOptions> cdnOptions) : ControllerBase
+    Database db,
+    ILogger<DownloadController> logger,
+    IOptionsSnapshot<CdnOptions> cdnOptions,
+    DownloadRequestLogger requestLogger) : ControllerBase
 {
     [HttpGet("manifest")]
     public IActionResult GetManifest(string version)
@@ -16,7 +19,7 @@ public sealed class DownloadCompatibilityController(
         if (cdnOptions.Value.DefaultFork is not { } defaultFork)
             return NotFound();
 
-        return downloadController.GetManifest(defaultFork, version);
+        return GetDownloadController().GetManifest(defaultFork, version);
     }
 
     [HttpOptions("download")]
@@ -25,7 +28,7 @@ public sealed class DownloadCompatibilityController(
         if (cdnOptions.Value.DefaultFork is not { } defaultFork)
             return NotFound();
 
-        return downloadController.DownloadOptions(defaultFork, version);
+        return GetDownloadController().DownloadOptions(defaultFork, version);
     }
 
     [HttpPost("download")]
@@ -34,6 +37,14 @@ public sealed class DownloadCompatibilityController(
         if (cdnOptions.Value.DefaultFork is not { } defaultFork)
             return NotFound();
 
-        return await downloadController.Download(defaultFork, version);
+        return await GetDownloadController().Download(defaultFork, version);
+    }
+
+    private DownloadController GetDownloadController()
+    {
+        return new DownloadController(db, logger, cdnOptions, requestLogger)
+        {
+            ControllerContext = ControllerContext
+        };
     }
 }
