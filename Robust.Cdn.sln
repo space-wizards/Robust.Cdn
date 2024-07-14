@@ -11,6 +11,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Files", "Solution 
 		Dockerfile = Dockerfile
 		.dockerignore = .dockerignore
 		Directory.Packages.props = Directory.Packages.props
+		RELEASE-NOTES.md = RELEASE-NOTES.md
+		README.md = README.md
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Robust.Cdn.Lib", "Robust.Cdn.Lib\Robust.Cdn.Lib.csproj", "{9B66C804-46C1-4D91-A028-8D12E25827CA}"
