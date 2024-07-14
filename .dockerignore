@@ -24,3 +24,8 @@
 LICENSE
 README.md
 **/appsettings.Development.json
+**/*.db
+*.DotSettings*
+*.editorconfig
+testData/
+

@@ -1,79 +1,94 @@
 ﻿using System.Buffers;
 using System.IO.Compression;
 using System.Text;
-using System.Threading.Channels;
 using Dapper;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
+using Quartz;
+using Robust.Cdn.Config;
 using Robust.Cdn.Helpers;
+using Robust.Cdn.Lib;
 using SpaceWizards.Sodium;
 using SQLitePCL;
 
-namespace Robust.Cdn.Services;
+namespace Robust.Cdn.Jobs;
 
-public sealed class DataLoader : BackgroundService
+[DisallowConcurrentExecution]
+public sealed class IngestNewCdnContentJob(
+    Database cdnDatabase,
+    IOptions<CdnOptions> cdnOptions,
+    IOptions<ManifestOptions> manifestOptions,
+    ISchedulerFactory schedulerFactory,
+    BuildDirectoryManager buildDirectoryManager,
+    ILogger<IngestNewCdnContentJob> logger) : IJob
 {
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IOptions<CdnOptions> _options;
-    private readonly ILogger<DataLoader> _logger;
+    public static readonly JobKey Key = new(nameof(IngestNewCdnContentJob));
+    public const string KeyForkName = "ForkName";
 
-    private readonly ChannelReader<object?> _channelReader;
-    private readonly ChannelWriter<object?> _channelWriter;
-
-    public DataLoader(IServiceScopeFactory scopeFactory, IOptions<CdnOptions> options, ILogger<DataLoader> logger)
+    public static JobDataMap Data(string fork) => new()
     {
-        _scopeFactory = scopeFactory;
-        _options = options;
-        _logger = logger;
+        { KeyForkName, fork }
+    };
 
-        var channel = Channel.CreateBounded<object?>(new BoundedChannelOptions(1) { SingleReader = true });
-        _channelReader = channel.Reader;
-        _channelWriter = channel.Writer;
-    }
-
-    public async ValueTask QueueUpdateVersions()
+    public async Task Execute(IJobExecutionContext context)
     {
-        await _channelWriter.WriteAsync(null);
-    }
+        var fork = context.MergedJobDataMap.GetString(KeyForkName) ?? throw new InvalidDataException();
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        _channelWriter.TryWrite(null);
+        logger.LogInformation("Ingesting new versions for fork: {Fork}", fork);
 
-        // Idk if there's a better way but make sure we don't hold up startup.
-        await Task.Delay(1000, stoppingToken);
+        var forkConfig = manifestOptions.Value.Forks[fork];
 
-        while (true)
-        {
-            await _channelReader.ReadAsync(stoppingToken);
-
-            _logger.LogInformation("Updating versions");
-
-            try
-            {
-                Update(stoppingToken);
-            }
-            catch (Exception e)
-            {
-                _logger.LogError(e, "Error while loading new content versions");
-            }
-        }
-
-        // ReSharper disable once FunctionNeverReturns
-    }
-
-    private void Update(CancellationToken cancel)
-    {
-        using var scope = _scopeFactory.CreateScope();
-
-        var options = _options.Value;
-        var connection = scope.ServiceProvider.GetRequiredService<Database>().Connection;
+        var connection = cdnDatabase.Connection;
         var transaction = connection.BeginTransaction();
 
-        var newVersions = FindNewVersions(connection);
+        List<string> newVersions;
+        try
+        {
+            newVersions = FindNewVersions(fork, connection);
 
-        if (newVersions.Count == 0)
-            return;
+            if (newVersions.Count == 0)
+                return;
+
+            IngestNewVersions(
+                fork,
+                connection,
+                newVersions,
+                ref transaction,
+                forkConfig,
+                context.CancellationToken);
+
+            logger.LogDebug("Committing database");
+
+            transaction.Commit();
+        }
+        finally
+        {
+            transaction.Dispose();
+        }
+
+        await QueueManifestAvailable(fork, newVersions);
+    }
+
+    private async Task QueueManifestAvailable(string fork, IEnumerable<string> newVersions)
+    {
+        var scheduler = await schedulerFactory.GetScheduler();
+        await scheduler.TriggerJob(
+            MakeNewManifestVersionsAvailableJob.Key,
+            MakeNewManifestVersionsAvailableJob.Data(fork, newVersions));
+    }
+
+    private void IngestNewVersions(
+        string fork,
+        SqliteConnection connection,
+        List<string> newVersions,
+        ref SqliteTransaction transaction,
+        ManifestForkOptions forkConfig,
+        CancellationToken cancel)
+    {
+        var cdnOpts = cdnOptions.Value;
+        var manifestOpts = manifestOptions.Value;
+
+        var forkId = EnsureForkCreated(fork, connection);
 
         using var stmtLookupContent = connection.Handle!.Prepare("SELECT Id FROM Content WHERE Hash = ?");
         using var stmtInsertContent = connection.Handle!.Prepare(
@@ -100,7 +115,7 @@ public sealed class DataLoader : BackgroundService
             {
                 if (versionIdx % 5 == 0)
                 {
-                    _logger.LogDebug("Doing interim commit");
+                    logger.LogDebug("Doing interim commit");
 
                     blob?.Dispose();
                     blob = null;
@@ -111,17 +126,20 @@ public sealed class DataLoader : BackgroundService
 
                 cancel.ThrowIfCancellationRequested();
 
-                _logger.LogInformation("Ingesting new version: {Version}", version);
+                logger.LogInformation("Ingesting new version: {Version}", version);
 
                 var versionId = connection.ExecuteScalar<long>(
-                    "INSERT INTO ContentVersion (Version, TimeAdded, ManifestHash, ManifestData, CountDistinctBlobs) " +
-                    "VALUES (@Version, datetime('now'), zeroblob(0), zeroblob(0), 0) " +
+                    "INSERT INTO ContentVersion (ForkId, Version, TimeAdded, ManifestHash, ManifestData, CountDistinctBlobs) " +
+                    "VALUES (@ForkId, @Version, datetime('now'), zeroblob(0), zeroblob(0), 0) " +
                     "RETURNING Id",
-                    new { Version = version });
+                    new { Version = version, ForkId = forkId });
 
                 stmtInsertContentManifestEntry.BindInt64(1, versionId);
 
-                var zipFilePath = Path.Combine(options.VersionDiskPath, version, options.ClientZipName);
+                var zipFilePath = buildDirectoryManager.GetBuildVersionFilePath(
+                    fork,
+                    version,
+                    forkConfig.ClientZipName + ".zip");
 
                 using var zipFile = ZipFile.OpenRead(zipFilePath);
 
@@ -169,7 +187,7 @@ public sealed class DataLoader : BackgroundService
                         var compression = ContentCompression.None;
 
                         // Try compression maybe.
-                        if (options.BlobCompress)
+                        if (cdnOpts.BlobCompress)
                         {
                             BufferHelpers.EnsurePooledBuffer(
                                 ref compressBuffer,
@@ -179,9 +197,9 @@ public sealed class DataLoader : BackgroundService
                             var compressedLength = compressor.Compress(
                                 compressBuffer,
                                 readData,
-                                options.BlobCompressLevel);
+                                cdnOpts.BlobCompressLevel);
 
-                            if (compressedLength + options.BlobCompressSavingsThreshold < dataLength)
+                            if (compressedLength + cdnOpts.BlobCompressSavingsThreshold < dataLength)
                             {
                                 compression = ContentCompression.ZStd;
                                 writeData = compressBuffer.AsSpan(0, compressedLength);
@@ -246,7 +264,7 @@ public sealed class DataLoader : BackgroundService
                     idx += 1;
                 }
 
-                _logger.LogDebug("Ingested {NewBlobCount} new blobs", newBlobCount);
+                logger.LogDebug("Ingested {NewBlobCount} new blobs", newBlobCount);
 
                 // Handle manifest hashing and compression.
                 {
@@ -257,7 +275,7 @@ public sealed class DataLoader : BackgroundService
 
                     var manifestHash = CryptoGenericHashBlake2B.Hash(32, manifestData, ReadOnlySpan<byte>.Empty);
 
-                    _logger.LogDebug("New manifest hash: {ManifestHash}", Convert.ToHexString(manifestHash));
+                    logger.LogDebug("New manifest hash: {ManifestHash}", Convert.ToHexString(manifestHash));
 
                     BufferHelpers.EnsurePooledBuffer(
                         ref compressBuffer,
@@ -267,7 +285,7 @@ public sealed class DataLoader : BackgroundService
                     var compressedLength = compressor.Compress(
                         compressBuffer,
                         manifestData,
-                        options.ManifestCompressLevel);
+                        cdnOpts.ManifestCompressLevel);
 
                     var compressedData = compressBuffer.AsSpan(0, compressedLength);
 
@@ -313,26 +331,25 @@ public sealed class DataLoader : BackgroundService
             ArrayPool<byte>.Shared.Return(readBuffer);
             ArrayPool<byte>.Shared.Return(compressBuffer);
         }
-
-        _logger.LogDebug("Committing database");
-
-        transaction.Commit();
-
-        GC.Collect();
     }
 
-    private List<string> FindNewVersions(SqliteConnection con)
+    private List<string> FindNewVersions(string fork, SqliteConnection con)
     {
         using var stmtCheckVersion = con.Handle!.Prepare("SELECT 1 FROM ContentVersion WHERE Version = ?");
 
         var newVersions = new List<(string, DateTime)>();
 
-        foreach (var versionDirectory in Directory.EnumerateDirectories(_options.Value.VersionDiskPath))
+        var dir = buildDirectoryManager.GetForkPath(fork);
+        if (!Directory.Exists(dir))
+            return [];
+
+        foreach (var versionDirectory in Directory.EnumerateDirectories(dir))
         {
             var createdTime = Directory.GetLastWriteTime(versionDirectory);
             var version = Path.GetFileName(versionDirectory);
 
-            _logger.LogTrace("Found version directory: {VersionDir}, write time: {WriteTime}", versionDirectory, createdTime);
+            logger.LogTrace("Found version directory: {VersionDir}, write time: {WriteTime}", versionDirectory,
+                createdTime);
 
             stmtCheckVersion.Reset();
             stmtCheckVersion.BindString(1, version);
@@ -340,20 +357,35 @@ public sealed class DataLoader : BackgroundService
             if (stmtCheckVersion.Step() == raw.SQLITE_ROW)
             {
                 // Already have version, skip.
-                _logger.LogTrace("Already have version: {Version}", version);
+                logger.LogTrace("Already have version: {Version}", version);
                 continue;
             }
 
-            if (!File.Exists(Path.Combine(versionDirectory, _options.Value.ClientZipName)))
+            var clientZipName = manifestOptions.Value.Forks[fork].ClientZipName + ".zip";
+
+            if (!File.Exists(Path.Combine(versionDirectory, clientZipName)))
             {
-                _logger.LogWarning("On-disk version is missing client zip: {Version}", version);
+                logger.LogWarning("On-disk version is missing client zip: {Version}", version);
                 continue;
             }
 
             newVersions.Add((version, createdTime));
-            _logger.LogTrace("Found new version: {Version}", version);
+            logger.LogTrace("Found new version: {Version}", version);
         }
 
         return newVersions.OrderByDescending(x => x.Item2).Select(x => x.Item1).ToList();
+    }
+
+    private static int EnsureForkCreated(string fork, SqliteConnection connection)
+    {
+        var id = connection.QuerySingleOrDefault<int?>(
+            "SELECT Id FROM Fork WHERE Name = @Name",
+            new { Name = fork });
+
+        id ??= connection.QuerySingle<int>(
+            "INSERT INTO Fork (Name) VALUES (@Name) RETURNING Id",
+            new { Name = fork });
+
+        return id.Value;
     }
 }

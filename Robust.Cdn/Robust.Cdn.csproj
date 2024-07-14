@@ -9,17 +9,25 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="8.0.0" />
-    <!--<PackageReference Include="Swashbuckle.AspNetCore" Version="6.3.0" />-->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.1" />
-    <PackageReference Include="Dapper" Version="2.1.28" />
-    <PackageReference Include="SpaceWizards.Sodium" Version="0.2.1" />
-    <PackageReference Include="SharpZstd.Interop" Version="1.5.2-beta1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" />
+    <!--<PackageReference Include="Swashbuckle.AspNetCore" />-->
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Quartz" />
+    <PackageReference Include="Quartz.Extensions.DependencyInjection" />
+    <PackageReference Include="Quartz.Extensions.Hosting" />
+    <PackageReference Include="SpaceWizards.Sodium" />
+    <PackageReference Include="SharpZstd.Interop" />
   </ItemGroup>
 
   <ItemGroup>
     <None Remove="Migrations\*.sql" />
     <EmbeddedResource Include="Migrations\*.sql" />
+    <EmbeddedResource Include="ManifestMigrations\*.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Robust.Cdn.Lib\Robust.Cdn.Lib.csproj" />
   </ItemGroup>
 
 </Project>

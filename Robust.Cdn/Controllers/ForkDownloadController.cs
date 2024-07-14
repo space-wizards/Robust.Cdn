@@ -5,48 +5,47 @@ using Dapper;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Robust.Cdn.Config;
 using Robust.Cdn.Helpers;
+using Robust.Cdn.Lib;
 using Robust.Cdn.Services;
+using SharpZstd;
 using SharpZstd.Interop;
 using SQLitePCL;
 
 namespace Robust.Cdn.Controllers;
 
 [ApiController]
-[Route("version/{version}")]
-public sealed class DownloadController : ControllerBase
+[Route("/fork/{fork}/version/{version}")]
+public sealed class DownloadController(
+    Database db,
+    ILogger<DownloadController> logger,
+    IOptionsSnapshot<CdnOptions> options,
+    DownloadRequestLogger requestLogger)
+    : ControllerBase
 {
     private const int MinDownloadProtocol = 1;
     private const int MaxDownloadProtocol = 1;
     private const int MaxDownloadRequestSize = 4 * 100_000;
 
-    private readonly Database _db;
-    private readonly ILogger<DownloadController> _logger;
-    private readonly DownloadRequestLogger _requestLogger;
-    private readonly CdnOptions _options;
-
-    public DownloadController(
-        Database db,
-        ILogger<DownloadController> logger,
-        IOptionsSnapshot<CdnOptions> options,
-        DownloadRequestLogger requestLogger)
-    {
-        _db = db;
-        _logger = logger;
-        _requestLogger = requestLogger;
-        _options = options.Value;
-    }
+    private readonly CdnOptions _options = options.Value;
 
     [HttpGet("manifest")]
-    public IActionResult GetManifest(string version)
+    public IActionResult GetManifest(string fork, string version)
     {
-        var con = _db.Connection;
+        var con = db.Connection;
         con.BeginTransaction(deferred: true);
 
         var (row, hash) = con.QuerySingleOrDefault<(long, byte[])>(
-            "SELECT Id, ManifestHash FROM ContentVersion WHERE Version = @Version",
+            """
+            SELECT CV.Id, CV.ManifestHash
+            FROM ContentVersion CV
+            INNER JOIN main.Fork F on F.Id = CV.ForkId
+            WHERE F.Name = @Fork AND Version = @Version
+            """,
             new
             {
+                Fork = fork,
                 Version = version
             });
 
@@ -66,14 +65,15 @@ public sealed class DownloadController : ControllerBase
             return File(blob, "text/plain");
         }
 
-        var decompress = new ZStdDecompressStream(blob);
+        var decompress = new ZstdDecodeStream(blob, leaveOpen: false);
 
         return File(decompress, "text/plain");
     }
 
     [HttpOptions("download")]
-    public IActionResult DownloadOptions(string version)
+    public IActionResult DownloadOptions(string fork, string version)
     {
+        _ = fork;
         _ = version;
 
         Response.Headers["X-Robust-Download-Min-Protocol"] = MinDownloadProtocol.ToString();
@@ -83,7 +83,7 @@ public sealed class DownloadController : ControllerBase
     }
 
     [HttpPost("download")]
-    public async Task<IActionResult> Download(string version)
+    public async Task<IActionResult> Download(string fork, string version)
     {
         if (Request.ContentType != "application/octet-stream")
             return BadRequest("Must specify application/octet-stream Content-Type");
@@ -96,13 +96,19 @@ public sealed class DownloadController : ControllerBase
         // TODO: this request limiting logic is pretty bad.
         HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = MaxDownloadRequestSize;
 
-        var con = _db.Connection;
+        var con = db.Connection;
         con.BeginTransaction(deferred: true);
 
         var (versionId, countDistinctBlobs) = con.QuerySingleOrDefault<(long, int)>(
-            "SELECT Id, CountDistinctBlobs FROM ContentVersion WHERE Version = @Version",
+            """
+            SELECT CV.Id, CV.CountDistinctBlobs
+            FROM ContentVersion CV
+            INNER JOIN main.Fork F on F.Id = CV.ForkId
+            WHERE F.Name = @Fork AND Version = @Version
+            """,
             new
             {
+                Fork = fork,
                 Version = version
             });
 
@@ -152,7 +158,7 @@ public sealed class DownloadController : ControllerBase
         if (optAutoStreamCompressRatio > 0)
         {
             var requestRatio = countFilesRequested / (float) countDistinctBlobs;
-            _logger.LogTrace("Auto stream compression ratio: {RequestRatio}", requestRatio);
+            logger.LogTrace("Auto stream compression ratio: {RequestRatio}", requestRatio);
             if (requestRatio > optAutoStreamCompressRatio)
             {
                 optStreamCompression = true;
@@ -166,12 +172,12 @@ public sealed class DownloadController : ControllerBase
         }
 
         var doStreamCompression = optStreamCompression && AcceptsZStd;
-        _logger.LogTrace("Transfer is using stream-compression: {PreCompressed}", doStreamCompression);
+        logger.LogTrace("Transfer is using stream-compression: {PreCompressed}", doStreamCompression);
 
         if (doStreamCompression)
         {
-            var zStdCompressStream = new ZStdCompressStream(outStream);
-            zStdCompressStream.Context.SetParameter(
+            var zStdCompressStream = new ZstdEncodeStream(outStream, leaveOpen: false);
+            zStdCompressStream.Encoder.SetParameter(
                 ZSTD_cParameter.ZSTD_c_compressionLevel,
                 _options.StreamCompressLevel);
 
@@ -191,7 +197,7 @@ public sealed class DownloadController : ControllerBase
 
         var preCompressed = optPreCompression;
 
-        _logger.LogTrace("Transfer is using pre-compression: {PreCompressed}", preCompressed);
+        logger.LogTrace("Transfer is using pre-compression: {PreCompressed}", preCompressed);
 
         var fileHeaderSize = 4;
         if (preCompressed)
@@ -281,7 +287,7 @@ public sealed class DownloadController : ControllerBase
                     count += 1;
                 }
 
-                _logger.LogTrace(
+                logger.LogTrace(
                     "Total SQLite: {SqliteElapsed} ms, ns / iter: {NanosPerIter}",
                     swSqlite.ElapsedMilliseconds,
                     swSqlite.Elapsed.TotalMilliseconds * 1_000_000 / count);
@@ -294,7 +300,7 @@ public sealed class DownloadController : ControllerBase
         }
 
         var bytesSent = countStream.Written;
-        _logger.LogTrace("Total data sent: {BytesSent} B", bytesSent);
+        logger.LogTrace("Total data sent: {BytesSent} B", bytesSent);
 
         if (_options.LogRequests)
         {
@@ -307,7 +313,7 @@ public sealed class DownloadController : ControllerBase
             var log = new DownloadRequestLogger.RequestLog(
                 buf, logCompression, protocol, DateTime.UtcNow, versionId, bytesSent);
 
-            await _requestLogger.QueueLog(log);
+            await requestLogger.QueueLog(log);
         }
 
         return new NoOpActionResult();

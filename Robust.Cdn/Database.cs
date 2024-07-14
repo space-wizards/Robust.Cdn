@@ -1,33 +1,69 @@
 ﻿using Dapper;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
+using Robust.Cdn.Config;
 
 namespace Robust.Cdn;
 
-public sealed class Database : IDisposable
+public abstract class BaseScopedDatabase : IDisposable
 {
-    private readonly IOptions<CdnOptions> _options;
     private SqliteConnection? _connection;
     public SqliteConnection Connection => _connection ??= OpenConnection();
 
-    public Database(IOptions<CdnOptions> options)
+    private SqliteConnection OpenConnection()
     {
-        _options = options;
+        var con = new SqliteConnection(GetConnectionString());
+        con.Open();
+        con.Execute("PRAGMA journal_mode=WAL");
+        return con;
     }
 
+#pragma warning disable CA1816
     public void Dispose()
     {
         _connection?.Dispose();
     }
+#pragma warning restore CA1816
 
-    private SqliteConnection OpenConnection()
+    protected abstract string GetConnectionString();
+
+    protected string GetConnectionStringForFile(string fileName)
     {
-        var options = _options.Value;
-        var conString = $"Data Source={options.DatabaseFileName};Mode=ReadWriteCreate;Pooling=True;Foreign Keys=True";
+        return $"Data Source={fileName};Mode=ReadWriteCreate;Pooling=True;Foreign Keys=True";
+    }
+}
 
-        var con = new SqliteConnection(conString);
-        con.Open();
-        con.Execute("PRAGMA journal_mode=WAL");
-        return con;
+/// <summary>
+/// Database service for CDN functionality.
+/// </summary>
+public sealed class Database(IOptions<CdnOptions> options) : BaseScopedDatabase
+{
+    protected override string GetConnectionString()
+    {
+        return GetConnectionStringForFile(options.Value.DatabaseFileName);
+    }
+}
+
+/// <summary>
+/// Database service for server manifest functionality.
+/// </summary>
+public sealed class ManifestDatabase(IOptions<ManifestOptions> options) : BaseScopedDatabase
+{
+    protected override string GetConnectionString()
+    {
+        return GetConnectionStringForFile(options.Value.DatabaseFileName);
+    }
+
+    public void EnsureForksCreated()
+    {
+        var con = Connection;
+        using var tx = con.BeginTransaction();
+
+        foreach (var forkName in options.Value.Forks.Keys)
+        {
+            con.Execute("INSERT INTO Fork (Name) VALUES (@Name) ON CONFLICT DO NOTHING", new { Name = forkName });
+        }
+
+        tx.Commit();
     }
 }

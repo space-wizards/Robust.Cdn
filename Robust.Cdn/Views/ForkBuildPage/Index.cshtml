@@ -1,0 +1,185 @@
+﻿@using Robust.Cdn.Controllers
+@using Robust.Cdn.Helpers
+@model Robust.Cdn.Controllers.ForkBuildPageController.Model
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+
+@{
+    Layout = null;
+
+    var displayName = Model.Options.DisplayName ?? Model.Fork;
+}
+
+
+@{
+    static string ShowRid(string rid)
+    {
+        return rid switch
+        {
+            "win-x64" => "Windows x64",
+            "win-arm64" => "Windows ARM64",
+            "linux-x64" => "Linux x64",
+            "linux-arm64" => "Linux ARM64",
+            "osx-x64" => "macOS x64 (Intel)",
+            "osx-arm64" => "macOS ARM64 (Apple Silicon)",
+            _ => rid
+        };
+    }
+
+    async Task ShowBuild(ForkBuildPageController.Version version)
+    {
+        <div class="build">
+            <dl class="build-info">
+                <dt>Version:</dt>
+                <dd><span class="versionNumber">@version.Name</span></dd>
+                <dt>Date:</dt>
+                <dd><time datetime="@version.PublishedTime.ToString("O")">@version.PublishedTime.ToString("f") UTC</time></dd>
+                <dt>Engine Version:</dt>
+                <dd><span class="versionNumber">@version.EngineVersion</span></dd>
+            </dl>
+            <h3>Download</h3>
+            <ul class="build-download-list">
+                @foreach (var versionServer in version.Servers)
+                {
+                    <li>
+                        <a asp-controller="ForkManifest" asp-action="GetFile"
+                           asp-route-fork="@Model.Fork" asp-route-version="@version.Name"
+                           asp-route-file="@versionServer.FileName">@ShowRid(versionServer.Platform)</a>
+
+                        @if (versionServer.FileSize is { } fileSize)
+                        {
+                            <text> (@ByteHelpers.FormatBytes(fileSize))</text>
+                        }
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+}
+
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>@(Model.Options.DisplayName ?? Model.Fork) builds - Robust.Cdn</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+
+            --build-border: grey;
+            --build-bg-one: #EEE;
+            --build-bg-two: #D0D0D0;
+        }
+
+        p {
+            margin-top: 0;
+        }
+
+        .build {
+            border: 1px solid var(--build-border);
+            padding: 4px;
+            margin-top: -1px;
+            background-color: var(--build-bg-one);
+        }
+
+        .build:nth-child(even) {
+            background-color: var(--build-bg-two);
+        }
+
+        .build h3 {
+            margin: 0;
+        }
+
+        .versionNumber {
+            font-family: Menlo, Consolas, Monaco, Liberation Mono, Lucida Console, monospace;
+        }
+
+        footer {
+            margin-top: 50px;
+            font-size: 0.75rem;
+        }
+
+        dl.build-info {
+            margin: 0;
+            display: grid;
+            grid-template-columns: max-content auto;
+        }
+
+        dl.build-info > dt {
+            grid-column-start: 1;
+        }
+
+        dl.build-info > dd {
+            grid-column-start: 2;
+        }
+
+        ul.build-download-list {
+            margin: 0 0 0.5rem;
+        }
+
+        @@media (prefers-color-scheme: dark) {
+            body {
+                background-color: #25252A;
+                color: white;
+
+                --build-border: #3F3F3F;
+                --build-bg-one: #212125;
+                --build-bg-two: #1A1A1D;
+            }
+
+            a {
+                color: rgb(88, 166, 255);
+            }
+        }
+    </style>
+</head>
+<body>
+<div>
+    <main>
+        <h1>@displayName builds</h1>
+        @if (Model.Options.BuildsPageLink is { } link)
+        {
+        <p>Here you can find the latest server builds available for <a href="@Model.Options.BuildsPageLink">@Model.Options.BuildsPageLinkText</a>.</p>
+        }
+        else
+        {
+        <p>Here you can find the latest server builds available for @displayName.</p>
+        }
+
+        <p>
+            If you somehow ended up here without reading the <a href="https://docs.spacestation14.com/en/general-development/setup/server-hosting-tutorial.html">Server Hosting Tutorial</a>, go read that first. It tells you how to actually host a server.
+        </p>
+
+        @if (Model.Versions.Count == 0)
+        {
+            <p>Congratulations. There are no server builds yet.<br/>Seriously, none at all. Go push some commits.</p>
+        }
+        else
+        {
+            <text>
+            <h2>Latest build</h2>
+
+            @{ await ShowBuild(Model.Versions[0]); }
+
+            <h2>Old builds</h2>
+
+            @foreach (var version in Model.Versions[1..])
+            {
+                await ShowBuild(version);
+            }
+            </text>
+        }
+
+    </main>
+
+    <footer>
+        <nav><a asp-controller="ForkManifest" asp-action="GetManifest" asp-route-fork="@Model.Fork">JSON</a></nav>
+    </footer>
+</div>
+</body>
+</html>
+
