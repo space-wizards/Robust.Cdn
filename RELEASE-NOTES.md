@@ -2,6 +2,10 @@
 
 ## Master
 
+## 2.0.1
+
+* Fixed compiled version number on binaries.
+
 ## 2.0.0
 
 * Added multi-fork support.
