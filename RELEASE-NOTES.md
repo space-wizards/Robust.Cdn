@@ -2,6 +2,10 @@
 
 ## Master
 
+## 2.0.2
+
+* Fixed `/version/*` compatibility paths not working correctly.
+
 ## 2.0.1
 
 * Fixed compiled version number on binaries.
