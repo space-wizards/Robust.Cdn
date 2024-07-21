@@ -66,6 +66,15 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+var pathBase = app.Configuration.GetValue<string>("PathBase");
+if (!string.IsNullOrEmpty(pathBase))
+{
+    app.Services.GetRequiredService<ILogger<Program>>().LogInformation("Using PathBase: {PathBase}", pathBase);
+    app.UsePathBase(pathBase);
+}
+
+app.UseRouting();
+
 // Make sure SQLite cleanly shuts down.
 app.Lifetime.ApplicationStopped.Register(SqliteConnection.ClearAllPools);
 
