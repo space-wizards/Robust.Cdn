@@ -2,6 +2,10 @@
 
 ## Master
 
+## 2.1.0
+
+* Added `PathBase` config option to allow hosting Robust.Cdn behind a subpath.
+
 ## 2.0.2
 
 * Fixed `/version/*` compatibility paths not working correctly.
