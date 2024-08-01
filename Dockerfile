@@ -1,4 +1,8 @@
 ﻿FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+
+# Make volume dirs
+RUN for DIR in /database /manifest /builds; do mkdir $DIR; chown app: $DIR; done
+
 USER $APP_UID
 WORKDIR /app
 EXPOSE 8080
@@ -19,9 +23,9 @@ FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "Robust.Cdn.dll"]
-VOLUME /database
-ENV CDN__DatabaseFileName=/database/content.db
-VOLUME /manifest
-ENV Manifest__DatabaseFileName=/manifest/manifest.db
-VOLUME /builds
+
+VOLUME /database /manifest /builds
+
 ENV Manifest__FileDiskPath=/builds
+ENV Manifest__DatabaseFileName=/manifest/manifest.db
+ENV CDN__DatabaseFileName=/database/content.db
