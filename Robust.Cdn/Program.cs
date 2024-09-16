@@ -21,8 +21,10 @@ builder.Services.AddControllersWithViews();
 builder.Services.AddScoped<BuildDirectoryManager>();
 builder.Services.AddSingleton<DownloadRequestLogger>();
 builder.Services.AddHostedService(services => services.GetRequiredService<DownloadRequestLogger>());
-builder.Services.AddTransient<Database>();
-builder.Services.AddTransient<ManifestDatabase>();
+builder.Services.AddScoped<Database>();
+builder.Services.AddScoped<ManifestDatabase>();
+builder.Services.AddScoped<PublishManager>();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddQuartz(q =>
 {
     q.AddJob<IngestNewCdnContentJob>(j => j.WithIdentity(IngestNewCdnContentJob.Key).StoreDurably());
@@ -36,6 +38,8 @@ builder.Services.AddQuartz(q =>
     {
         schedule.RepeatForever().WithIntervalInHours(24);
     }));
+    q.ScheduleJob<DeleteInProgressPublishesJob>(t =>
+        t.WithSimpleSchedule(s => s.RepeatForever().WithIntervalInHours(24)));
 });
 
 builder.Services.AddQuartzHostedService(q =>

@@ -5,11 +5,11 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using Quartz;
 using Robust.Cdn.Config;
 using Robust.Cdn.Helpers;
 using Robust.Cdn.Jobs;
+using Robust.Cdn.Services;
 using SpaceWizards.Sodium;
 
 namespace Robust.Cdn.Controllers;
@@ -33,7 +33,7 @@ namespace Robust.Cdn.Controllers;
 /// </para>
 /// </remarks>
 [ApiController]
-[Route("/fork/{fork}")]
+[Route("/fork/{fork}/publish")]
 public sealed partial class ForkPublishController(
     ForkAuthHelper authHelper,
     IHttpClientFactory httpFactory,
@@ -41,80 +41,14 @@ public sealed partial class ForkPublishController(
     ISchedulerFactory schedulerFactory,
     BaseUrlManager baseUrlManager,
     BuildDirectoryManager buildDirectoryManager,
+    PublishManager publishManager,
     ILogger<ForkPublishController> logger)
     : ControllerBase
 {
-    private static readonly Regex ValidVersionRegex = MyRegex();
+    private static readonly Regex ValidVersionRegex = ValidVersionRegexBuilder();
+    private static readonly Regex ValidFileRegex = ValidFileRegexBuilder();
 
     public const string PublishFetchHttpClient = "PublishFetch";
-
-    [HttpPost("publish")]
-    public async Task<IActionResult> PostPublish(
-        string fork,
-        [FromBody] PublishRequest request,
-        CancellationToken cancel)
-    {
-        if (!authHelper.IsAuthValid(fork, out var forkConfig, out var failureResult))
-            return failureResult;
-
-        baseUrlManager.ValidateBaseUrl();
-
-        if (string.IsNullOrWhiteSpace(request.Archive))
-            return BadRequest("Archive is empty");
-
-        if (!ValidVersionRegex.IsMatch(request.Version))
-            return BadRequest("Invalid version name");
-
-        if (VersionAlreadyExists(fork, request.Version))
-            return Conflict("Version already exists");
-
-        logger.LogInformation("Starting publish for fork {Fork} version {Version}", fork, request.Version);
-
-        var httpClient = httpFactory.CreateClient();
-
-        await using var tmpFile = CreateTempFile();
-
-        logger.LogDebug("Downloading publish archive {Archive} to temp file", request.Archive);
-
-        await using var response = await httpClient.GetStreamAsync(request.Archive, cancel);
-        await response.CopyToAsync(tmpFile, cancel);
-        tmpFile.Seek(0, SeekOrigin.Begin);
-
-        using var archive = new ZipArchive(tmpFile, ZipArchiveMode.Read);
-
-        logger.LogDebug("Classifying archive entries...");
-
-        var artifacts = ClassifyEntries(forkConfig, archive);
-        var clientArtifact = artifacts.SingleOrDefault(art => art.Type == ArtifactType.Client);
-        if (clientArtifact == null)
-            return BadRequest("Client zip is missing!");
-
-        var versionDir = buildDirectoryManager.GetBuildVersionPath(fork, request.Version);
-
-        try
-        {
-            Directory.CreateDirectory(versionDir);
-
-            var diskFiles = ExtractZipToVersionDir(artifacts, versionDir);
-            var buildJson = GenerateBuildJson(diskFiles, clientArtifact, request, fork);
-            InjectBuildJsonIntoServers(diskFiles, buildJson);
-
-            AddVersionToDatabase(clientArtifact, diskFiles, fork, request);
-
-            await QueueIngestJobAsync(fork);
-
-            logger.LogInformation("Publish succeeded!");
-
-            return NoContent();
-        }
-        catch
-        {
-            // Clean up after ourselves if something goes wrong.
-            Directory.Delete(versionDir, true);
-
-            throw;
-        }
-    }
 
     private bool VersionAlreadyExists(string fork, string version)
     {
@@ -132,40 +66,43 @@ public sealed partial class ForkPublishController(
             });
     }
 
-    private List<ZipArtifact> ClassifyEntries(ManifestForkOptions forkConfig, ZipArchive archive)
+    private List<(T key, Artifact artifact)> ClassifyEntries<T>(
+        ManifestForkOptions forkConfig,
+        IEnumerable<T> items,
+        Func<T, string> getName)
     {
-        var list = new List<ZipArtifact>();
+        var list = new List<(T, Artifact)>();
 
-        foreach (var entry in archive.Entries)
+        foreach (var item in items)
         {
-            var artifact = ClassifyEntry(forkConfig, entry);
+            var name = getName(item);
+            var artifact = ClassifyEntry(forkConfig, name);
 
             if (artifact == null)
                 continue;
 
             logger.LogDebug(
                 "Artifact entry {Name}: Type {Type} Platform {Platform}",
-                entry.FullName,
+                name,
                 artifact.Type,
                 artifact.Platform);
 
-            list.Add(artifact);
+            list.Add((item, artifact));
         }
 
         return list;
     }
 
-    private static ZipArtifact? ClassifyEntry(ManifestForkOptions forkConfig, ZipArchiveEntry entry)
+    private static Artifact? ClassifyEntry(ManifestForkOptions forkConfig, string name)
     {
-        if (entry.FullName == $"{forkConfig.ClientZipName}.zip")
-            return new ZipArtifact { Entry = entry, Type = ArtifactType.Client };
+        if (name == $"{forkConfig.ClientZipName}.zip")
+            return new Artifact { Type = ArtifactType.Client };
 
-        if (entry.FullName.StartsWith(forkConfig.ServerZipName) && entry.FullName.EndsWith(".zip"))
+        if (name.StartsWith(forkConfig.ServerZipName) && name.EndsWith(".zip"))
         {
-            var rid = entry.FullName[forkConfig.ServerZipName.Length..^".zip".Length];
-            return new ZipArtifact
+            var rid = name[forkConfig.ServerZipName.Length..^".zip".Length];
+            return new Artifact
             {
-                Entry = entry,
                 Platform = rid,
                 Type = ArtifactType.Server
             };
@@ -174,31 +111,10 @@ public sealed partial class ForkPublishController(
         return null;
     }
 
-    private Dictionary<ZipArtifact, string> ExtractZipToVersionDir(List<ZipArtifact> artifacts, string versionDir)
-    {
-        logger.LogDebug("Extracting artifacts to directory {Directory}", versionDir);
-
-        var dict = new Dictionary<ZipArtifact, string>();
-
-        foreach (var artifact in artifacts)
-        {
-            var filePath = Path.Combine(versionDir, artifact.Entry.Name);
-            logger.LogTrace("Extracting artifact {Name}", artifact.Entry.FullName);
-
-            using var entry = artifact.Entry.Open();
-            using var file = System.IO.File.Create(filePath);
-
-            entry.CopyTo(file);
-            dict.Add(artifact, filePath);
-        }
-
-        return dict;
-    }
-
     private MemoryStream GenerateBuildJson(
-        Dictionary<ZipArtifact, string> diskFiles,
-        ZipArtifact clientArtifact,
-        PublishRequest request,
+        Dictionary<Artifact, string> diskFiles,
+        Artifact clientArtifact,
+        VersionMetadata metadata,
         string forkName)
     {
         logger.LogDebug("Generating build.json contents");
@@ -219,10 +135,10 @@ public sealed partial class ForkPublishController(
         var data = new Dictionary<string, string>
         {
             { "download", baseUrlManager.MakeBuildInfoUrl($"fork/{{FORK_ID}}/version/{{FORK_VERSION}}/file/{diskFileName}") },
-            { "version", request.Version },
+            { "version", metadata.Version },
             { "hash", hash },
             { "fork_id", forkName },
-            { "engine_version", request.EngineVersion },
+            { "engine_version", metadata.EngineVersion },
             { "manifest_url", baseUrlManager.MakeBuildInfoUrl("fork/{FORK_ID}/version/{FORK_VERSION}/manifest") },
             { "manifest_download_url", baseUrlManager.MakeBuildInfoUrl("fork/{FORK_ID}/version/{FORK_VERSION}/download") },
             { "manifest_hash", manifestHash }
@@ -269,7 +185,7 @@ public sealed partial class ForkPublishController(
         return HashHelper.HashBlake2B(stream);
     }
 
-    private void InjectBuildJsonIntoServers(Dictionary<ZipArtifact, string> diskFiles, MemoryStream buildJson)
+    private void InjectBuildJsonIntoServers(Dictionary<Artifact, string> diskFiles, MemoryStream buildJson)
     {
         logger.LogDebug("Adding build.json to server builds");
 
@@ -298,15 +214,14 @@ public sealed partial class ForkPublishController(
     }
 
     private void AddVersionToDatabase(
-        ZipArtifact clientArtifact,
-        Dictionary<ZipArtifact, string> diskFiles,
+        Artifact clientArtifact,
+        Dictionary<Artifact, string> diskFiles,
         string fork,
-        PublishRequest request)
+        VersionMetadata metadata)
     {
         logger.LogDebug("Adding new version to database");
 
         var dbCon = manifestDatabase.Connection;
-        using var tx = dbCon.BeginTransaction();
 
         var forkId = dbCon.QuerySingle<int>("SELECT Id FROM Fork WHERE Name = @Name", new { Name = fork });
 
@@ -319,11 +234,11 @@ public sealed partial class ForkPublishController(
             """,
             new
             {
-                Name = request.Version,
+                Name = metadata.Version,
                 ForkId = forkId,
                 ClientName = clientName,
                 ClientSha256 = clientSha256,
-                request.EngineVersion,
+                metadata.EngineVersion,
                 PublishTime = DateTime.UtcNow
             });
 
@@ -347,8 +262,6 @@ public sealed partial class ForkPublishController(
                     FileSize = fileSize
                 });
         }
-
-        tx.Commit();
     }
 
     private static (string name, byte[] hash, long size) GetFileNameSha256Pair(string diskPath)
@@ -384,13 +297,21 @@ public sealed partial class ForkPublishController(
         public required string Archive { get; set; }
     }
 
+    private sealed class VersionMetadata
+    {
+        public required string Version { get; init; }
+        public required string EngineVersion { get; set; }
+    }
+
     // File cannot start with a dot but otherwise most shit is fair game.
     [GeneratedRegex(@"[a-zA-Z0-9\-_][a-zA-Z0-9\-_.]*")]
-    private static partial Regex MyRegex();
+    private static partial Regex ValidVersionRegexBuilder();
 
-    private sealed class ZipArtifact
+    [GeneratedRegex(@"[a-zA-Z0-9\-_][a-zA-Z0-9\-_.]*")]
+    private static partial Regex ValidFileRegexBuilder();
+
+    private sealed class Artifact
     {
-        public required ZipArchiveEntry Entry { get; set; }
         public ArtifactType Type { get; set; }
         public string? Platform { get; set; }
     }

@@ -12,6 +12,15 @@ public sealed class ManifestOptions
     public string FileDiskPath { get; set; } = "";
 
     public Dictionary<string, ManifestForkOptions> Forks { get; set; } = new();
+
+    /// <summary>
+    /// Time, in minutes, before an in-progress publish "times out" and can be deleted.
+    /// </summary>
+    /// <remarks>
+    /// Generally, publishes really should not take longer than more than a few minutes.
+    /// If a publish takes longer, it likely indicates an error caused it to be aborted.
+    /// </remarks>
+    public int InProgressPublishTimeoutMinutes { get; set; } = 60;
 }
 
 public sealed class ManifestForkOptions
