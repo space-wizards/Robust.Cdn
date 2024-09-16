@@ -2,6 +2,12 @@
 
 ## Master
 
+## 2.2.0
+
+* Added new multi-request publishing workflow.
+* Fixed default permissions on Docker volumes.
+* FreeBSD platform names are now nicely displayed on the HTML builds page.
+
 ## 2.1.0
 
 * Added `PathBase` config option to allow hosting Robust.Cdn behind a subpath.
