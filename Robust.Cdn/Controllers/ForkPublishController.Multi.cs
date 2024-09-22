@@ -32,9 +32,10 @@ public sealed partial class ForkPublishController
 
         logger.LogInformation("Starting multi publish for fork {Fork} version {Version}", fork, request.Version);
 
+        var forkId = dbCon.QuerySingle<int>("SELECT Id FROM Fork WHERE Name = @Name", new { Name = fork });
         var hasExistingPublish = dbCon.QuerySingleOrDefault<bool>(
-            "SELECT 1 FROM PublishInProgress WHERE Version = @Version ",
-            new { request.Version });
+            "SELECT 1 FROM PublishInProgress WHERE Version = @Version AND ForkId = @ForkId",
+            new { request.Version, ForkId = forkId });
         if (hasExistingPublish)
         {
             // If a publish with this name already exists we abort it and start again.
@@ -43,8 +44,6 @@ public sealed partial class ForkPublishController
             logger.LogWarning("Already had an in-progress publish for this version, aborting it and restarting.");
             publishManager.AbortMultiPublish(fork, request.Version, tx, commit: false);
         }
-
-        var forkId = dbCon.QuerySingle<int>("SELECT Id FROM Fork WHERE Name = @Name", new { Name = fork });
 
         await dbCon.ExecuteAsync("""
             INSERT INTO PublishInProgress (Version, ForkId, StartTime, EngineVersion)
