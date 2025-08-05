@@ -62,12 +62,12 @@ public sealed class DownloadController(
         {
             Response.Headers.ContentEncoding = "zstd";
 
-            return File(blob, "text/plain");
+            return File(blob, "text/plain; charset=utf-8");
         }
 
         var decompress = new ZstdDecodeStream(blob, leaveOpen: false);
 
-        return File(decompress, "text/plain");
+        return File(decompress, "text/plain; charset=utf-8");
     }
 
     [HttpOptions("download")]
