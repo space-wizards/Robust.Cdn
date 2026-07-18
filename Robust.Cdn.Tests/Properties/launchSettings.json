@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "Robust.Cdn.Tests": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:58678;http://localhost:58679"
+    }
+  }
+}

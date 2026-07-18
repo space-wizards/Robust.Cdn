@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/Solution Files/">
+    <File Path=".dockerignore" />
+    <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+    <File Path="Directory.Packages.props" />
+    <File Path="Dockerfile" />
+    <File Path="LICENSE.txt" />
+    <File Path="README.md" />
+    <File Path="RELEASE-NOTES.md" />
+  </Folder>
+  <Project Path="Robust.Cdn.Downloader/Robust.Cdn.Downloader.csproj" />
+  <Project Path="Robust.Cdn.Lib/Robust.Cdn.Lib.csproj" />
+  <Project Path="Robust.Cdn.Tests/Robust.Cdn.Tests.csproj" />
+  <Project Path="Robust.Cdn/Robust.Cdn.csproj" />
+</Solution>
