@@ -8,3 +8,4 @@ Robust.Cdn/content.db*
 Robust.Cdn/manifest.db*
 *.user
 testData/
+/.vs/**
