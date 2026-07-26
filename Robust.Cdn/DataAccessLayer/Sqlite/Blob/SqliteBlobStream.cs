@@ -1,8 +1,8 @@
-﻿using Microsoft.Data.Sqlite;
+using Microsoft.Data.Sqlite;
 using SQLitePCL;
 using static SQLitePCL.raw;
 
-namespace Robust.Cdn.Helpers;
+namespace Robust.Cdn.DataAccessLayer.Sqlite.Blob;
 
 /// <summary>
 /// Expecting Microsoft top engineers to understand basic API design principles is too much to ask for,

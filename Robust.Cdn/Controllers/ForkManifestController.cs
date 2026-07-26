@@ -1,9 +1,9 @@
-﻿using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Mime;
-using Dapper;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Robust.Cdn.Config;
+using Robust.Cdn.DataAccessLayer;
 using Robust.Cdn.Helpers;
 
 namespace Robust.Cdn.Controllers;
@@ -15,7 +15,7 @@ namespace Robust.Cdn.Controllers;
 [ApiController]
 [Route("/fork/{fork}")]
 public sealed class ForkManifestController(
-    ManifestDatabase database,
+    ManifestDatabase manifestDatabase,
     BuildDirectoryManager buildDirectoryManager,
     IOptions<ManifestOptions> manifestOptions)
     : ControllerBase
@@ -26,20 +26,9 @@ public sealed class ForkManifestController(
         if (!TryCheckBasicAuth(fork, out var errorResult))
             return errorResult;
 
-        var rowId = database.Connection.QuerySingleOrDefault<long>(
-            "SELECT ROWID FROM Fork WHERE Name == @Fork AND ServerManifestCache IS NOT NULL",
-            new { Fork = fork });
-
-        if (rowId == 0)
+        var stream = manifestDatabase.FindManifestCache(fork);
+        if (stream == null)
             return NotFound();
-
-        var stream = SqliteBlobStream.Open(
-            database.Connection.Handle!,
-            "main",
-            "Fork",
-            "ServerManifestCache",
-            rowId,
-            false);
 
         return File(stream, MediaTypeNames.Application.Json);
     }
@@ -57,14 +46,7 @@ public sealed class ForkManifestController(
         if (!TryCheckBasicAuth(fork, out var errorResult))
             return errorResult;
 
-        var versionExists = database.Connection.QuerySingleOrDefault<bool>("""
-            SELECT 1
-            FROM ForkVersion, Fork
-            WHERE ForkVersion.Name = @Version
-              AND Fork.Name = @Fork
-              AND Fork.Id = ForkVersion.ForkId
-            """, new { Fork = fork, Version = version });
-
+        var versionExists = manifestDatabase.IsVersionExists(fork, version);
         if (!versionExists)
             return NotFound();
 

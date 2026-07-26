@@ -5,6 +5,7 @@ using Quartz;
 using Robust.Cdn;
 using Robust.Cdn.Config;
 using Robust.Cdn.Controllers;
+using Robust.Cdn.DataAccessLayer;
 using Robust.Cdn.Helpers;
 using Robust.Cdn.Jobs;
 using Robust.Cdn.Services;
@@ -88,7 +89,7 @@ app.Lifetime.ApplicationStopped.Register(SqliteConnection.ClearAllPools);
     var logFactory = services.GetRequiredService<ILoggerFactory>();
     var loggerStartup = logFactory.CreateLogger("Robust.Cdn.Program");
     var manifestOptions = services.GetRequiredService<IOptions<ManifestOptions>>().Value;
-    var db = services.GetRequiredService<Database>();
+    var cdnOptions = services.GetRequiredService<IOptions<CdnOptions>>().Value;
     var manifestDb = services.GetRequiredService<ManifestDatabase>();
 
     if (string.IsNullOrEmpty(manifestOptions.FileDiskPath))
@@ -106,15 +107,19 @@ app.Lifetime.ApplicationStopped.Register(SqliteConnection.ClearAllPools);
     loggerStartup.LogDebug("Running migrations!");
     var loggerMigrator = logFactory.CreateLogger<Migrator>();
 
-    var success = Migrator.Migrate(services, loggerMigrator, db.Connection, "Robust.Cdn.Migrations");
-    success &= Migrator.Migrate(services, loggerMigrator, manifestDb.Connection, "Robust.Cdn.ManifestMigrations");
+    var mainMigrator = new Migrator(cdnOptions);
+    var manifestMigrator = new Migrator(manifestOptions);
+    var success = mainMigrator.Migrate(services, loggerMigrator, "Robust.Cdn.Migrations");
+    success &= manifestMigrator.Migrate(services, loggerMigrator, "Robust.Cdn.ManifestMigrations");
     if (!success)
         return 1;
 
     loggerStartup.LogDebug("Done running migrations!");
 
     loggerStartup.LogDebug("Ensuring forks created in manifest DB");
-    manifestDb.EnsureForksCreated();
+    manifestDb.StartTransaction();
+    manifestDb.EnsureForksCreated(manifestOptions.Forks.Keys);
+    manifestDb.Commit();
     loggerStartup.LogDebug("Done creating forks in manifest DB!");
 
     var scheduler = await initScope.ServiceProvider.GetRequiredService<ISchedulerFactory>().GetScheduler();

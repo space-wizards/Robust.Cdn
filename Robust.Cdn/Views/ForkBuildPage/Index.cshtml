@@ -1,4 +1,4 @@
-﻿@using Robust.Cdn.Controllers
+@using Robust.Cdn.DataAccessLayer.Models
 @using Robust.Cdn.Helpers
 @model Robust.Cdn.Controllers.ForkBuildPageController.Model
 @addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
@@ -27,15 +27,15 @@
         };
     }
 
-    async Task ShowBuild(ForkBuildPageController.Version version)
+    async Task ShowBuild(BuildVersionArtifactInfo buildVersion)
     {
         <div class="build">
             <dl class="build-info">
                 <dt>Version:</dt>
-                <dd><span class="versionNumber">@version.Name</span></dd>
+                <dd><span class="versionNumber">@buildVersion.Name</span></dd>
                 <dt>Date:</dt>
-                <dd><time datetime="@version.PublishedTime.ToString("O")">@version.PublishedTime.ToString("f") UTC</time></dd>
-                @if (version.EngineVersion is { } engineVersion)
+                <dd><time datetime="@buildVersion.PublishedTime.ToString("O")">@buildVersion.PublishedTime.ToString("f") UTC</time></dd>
+                @if (buildVersion.EngineVersion is { } engineVersion)
                 {
                     <dt>Engine Version:</dt>
                     <dd><span class="versionNumber">@engineVersion</span></dd>
@@ -43,11 +43,11 @@
             </dl>
             <h3>Download</h3>
             <ul class="build-download-list">
-                @foreach (var versionServer in version.Servers)
+                @foreach (var versionServer in buildVersion.Servers)
                 {
                     <li>
                         <a asp-controller="ForkManifest" asp-action="GetFile"
-                           asp-route-fork="@Model.Fork" asp-route-version="@version.Name"
+                           asp-route-fork="@Model.Fork" asp-route-version="@buildVersion.Name"
                            asp-route-file="@versionServer.FileName">@ShowRid(versionServer.Platform)</a>
 
                         @if (versionServer.FileSize is { } fileSize)

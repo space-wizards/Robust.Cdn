@@ -1,26 +1,18 @@
-﻿using System.Reflection;
-using Dapper;
+using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
+using Robust.Cdn.DataAccessLayer;
 
 namespace Robust.Cdn.Controllers;
 
 [ApiController]
-public class StatusController : ControllerBase
+public class StatusController(Database db) : ControllerBase
 {
-    private readonly Database _db;
-
-    public StatusController(Database db)
-    {
-        _db = db;
-    }
-
     [HttpGet("control/status")]
-    public IActionResult GetControlStatus()
+    public IActionResult GetControlStatus(CancellationToken ct)
     {
         try
         {
-            var con = _db.Connection;
-            var versionCount = con.QuerySingleOrDefault<int>("SELECT COUNT(Id) FROM ContentVersion");
+            var versionCount = db.VersionCount();
 
             var assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
 

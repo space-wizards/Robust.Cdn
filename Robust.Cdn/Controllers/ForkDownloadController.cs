@@ -1,17 +1,16 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using System.Collections;
 using System.Diagnostics;
-using Dapper;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Robust.Cdn.Config;
+using Robust.Cdn.DataAccessLayer;
 using Robust.Cdn.Helpers;
 using Robust.Cdn.Lib;
 using Robust.Cdn.Services;
 using SharpZstd;
 using SharpZstd.Interop;
-using SQLitePCL;
 
 namespace Robust.Cdn.Controllers;
 
@@ -33,39 +32,24 @@ public sealed class DownloadController(
     [HttpGet("manifest")]
     public IActionResult GetManifest(string fork, string version)
     {
-        var con = db.Connection;
-        con.BeginTransaction(deferred: true);
-
-        var (row, hash) = con.QuerySingleOrDefault<(long, byte[])>(
-            """
-            SELECT CV.Id, CV.ManifestHash
-            FROM ContentVersion CV
-            INNER JOIN main.Fork F on F.Id = CV.ForkId
-            WHERE F.Name = @Fork AND Version = @Version
-            """,
-            new
-            {
-                Fork = fork,
-                Version = version
-            });
-
-        if (row == 0)
+        db.StartTransaction(true);
+        var manifestBlob = db.FindManifestDataBlob(fork, version);
+        if (manifestBlob == null)
             return NotFound();
 
         // I'll be honest I'm not sure how useful this is.
         // I just wanted to make that SELECT less lonely.
-        Response.Headers["X-Manifest-Hash"] = Convert.ToHexString(hash);
+        Response.Headers["X-Manifest-Hash"] = manifestBlob.ManifestHash;
 
-        var blob = SqliteBlobStream.Open(con.Handle!, "main", "ContentVersion", "ManifestData", row, false);
 
         if (AcceptsZStd)
         {
             Response.Headers.ContentEncoding = "zstd";
 
-            return File(blob, "text/plain; charset=utf-8");
+            return File(manifestBlob.Blob, "text/plain; charset=utf-8");
         }
 
-        var decompress = new ZstdDecodeStream(blob, leaveOpen: false);
+        var decompress = new ZstdDecodeStream(manifestBlob.Blob, leaveOpen: false);
 
         return File(decompress, "text/plain; charset=utf-8");
     }
@@ -96,31 +80,12 @@ public sealed class DownloadController(
         // TODO: this request limiting logic is pretty bad.
         HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = MaxDownloadRequestSize;
 
-        var con = db.Connection;
-        con.BeginTransaction(deferred: true);
+        db.StartTransaction(deferred: true);
 
-        var (versionId, countDistinctBlobs) = con.QuerySingleOrDefault<(long, int)>(
-            """
-            SELECT CV.Id, CV.CountDistinctBlobs
-            FROM ContentVersion CV
-            INNER JOIN main.Fork F on F.Id = CV.ForkId
-            WHERE F.Name = @Fork AND Version = @Version
-            """,
-            new
-            {
-                Fork = fork,
-                Version = version
-            });
-
-        if (versionId == 0)
+        var result = db.GetDistinctBlobsAndManifestEntriesCounts(fork, version);
+        if (result == null)
             return NotFound();
-
-        var entriesCount = con.ExecuteScalar<int>(
-            "SELECT COUNT(*) FROM ContentManifestEntry WHERE VersionId = @VersionId",
-            new
-            {
-                VersionId = versionId
-            });
+        var (versionId, countDistinctBlobs, entriesCount) = result.Value;
 
         var buffer = new MemoryStream();
         await Request.Body.CopyToAsync(buffer);
@@ -157,7 +122,7 @@ public sealed class DownloadController(
 
         if (optAutoStreamCompressRatio > 0)
         {
-            var requestRatio = countFilesRequested / (float) countDistinctBlobs;
+            var requestRatio = countFilesRequested / (float)countDistinctBlobs;
             logger.LogTrace("Auto stream compression ratio: {RequestRatio}", requestRatio);
             if (requestRatio > optAutoStreamCompressRatio)
             {
@@ -216,20 +181,10 @@ public sealed class DownloadController(
 
             await outStream.WriteAsync(streamHeader);
 
-            SqliteBlobStream? blob = null;
             ZStdDecompressStream? decompress = null;
 
             try
             {
-                using var stmt =
-                    con.Handle!.Prepare(
-                        "SELECT c.Compression, c.Size, c.Id " +
-                        "FROM ContentManifestEntry cme " +
-                        "INNER JOIN Content c on c.Id = cme.ContentId " +
-                        "WHERE cme.VersionId = @VersionId AND cme.ManifestIdx = @ManifestIdx");
-
-                stmt.BindInt64(1, versionId); // @VersionId
-
                 offset = 0;
                 var swSqlite = new Stopwatch();
                 var count = 0;
@@ -238,32 +193,16 @@ public sealed class DownloadController(
                     var index = BinaryPrimitives.ReadInt32LittleEndian(buf.Slice(offset, 4).Span);
 
                     swSqlite.Start();
-                    stmt.BindInt(2, index);
 
-                    if (stmt.Step() != raw.SQLITE_ROW)
-                        throw new InvalidOperationException("Unable to find manifest row??");
+                    var (compression, size, rowId) = db.ListContentMetadata(versionId, index);
 
-                    var compression = (ContentCompression)stmt.ColumnInt(0);
-                    var size = stmt.ColumnInt(1);
-                    var rowId = stmt.ColumnInt64(2);
-
-                    stmt.Reset();
                     swSqlite.Stop();
-
-                    // _aczSawmill.Debug($"{index:D5}: {blobLength:D8} {dataOffset:D8} {dataLength:D8}");
 
                     BinaryPrimitives.WriteInt32LittleEndian(fileHeader, size);
 
-                    if (blob == null)
-                    {
-                        blob = SqliteBlobStream.Open(con.Handle!, "main", "Content", "Data", rowId, false);
-                        if (!preCompressed)
-                            decompress = new ZStdDecompressStream(blob, ownStream: false);
-                    }
-                    else
-                    {
-                        blob.Reopen(rowId);
-                    }
+                    var blob = db.OpenContentBlobForRead(rowId);
+                    if (!preCompressed)
+                        decompress = new ZStdDecompressStream(blob, ownStream: false);
 
                     Stream copyFromStream = blob;
                     if (preCompressed)
@@ -294,7 +233,6 @@ public sealed class DownloadController(
             }
             finally
             {
-                blob?.Dispose();
                 decompress?.Dispose();
             }
         }

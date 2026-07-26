@@ -1,28 +1,30 @@
-﻿using System.Reflection;
 using Dapper;
 using Microsoft.Data.Sqlite;
+using System.Reflection;
+using Robust.Cdn.Config;
+using Robust.Cdn.DataAccessLayer;
 
 namespace Robust.Cdn;
 
 /// <summary>
 /// Utility class to do SQLite database migrations.
 /// </summary>
-public sealed class Migrator
+public class Migrator(IDatabaseOptions options) : ScopedSqliteRepositoryBase(options)
 {
-    internal static bool Migrate(IServiceProvider services, ILogger logger, SqliteConnection connection, string prefix)
+    public bool Migrate(IServiceProvider services, ILogger logger, string prefix)
     {
         logger.LogDebug("Migrating with prefix {Prefix}", prefix);
 
-        using var transaction = connection.BeginTransaction(deferred: true);
+        StartTransaction(true);
 
-        connection.Execute(@"
+        Connection.Execute(@"
         CREATE TABLE IF NOT EXISTS SchemaVersions(
             SchemaVersionID INTEGER PRIMARY KEY,
             ScriptName TEXT NOT NULL,
             Applied DATETIME NOT NULL
-        );");
+        );", transaction: Transaction);
 
-        var appliedScripts = connection.Query<string>("SELECT ScriptName FROM main.SchemaVersions");
+        var appliedScripts = Connection.Query<string>("SELECT ScriptName FROM main.SchemaVersions", transaction: Transaction);
 
         // ReSharper disable once InvokeAsExtensionMethod
         var scriptsToApply = Enumerable.Concat(
@@ -34,32 +36,32 @@ public sealed class Migrator
         foreach (var (name, script) in scriptsToApply)
         {
             logger.LogInformation("Applying migration {Transaction}!", name);
-            transaction.Save(name);
+            Transaction.Save(name);
 
             try
             {
-                var code = script.Up(services, connection);
+                var code = script.Up(services, Connection);
 
                 if (!string.IsNullOrWhiteSpace(code))
-                    connection.Execute(code);
+                    Connection.Execute(code);
 
-                connection.Execute(
+                Connection.Execute(
                     "INSERT INTO SchemaVersions(ScriptName, Applied) VALUES (@Script, datetime('now'))",
                     new { Script = name });
 
-                transaction.Release(name);
+                Transaction.Release(name);
             }
             catch (Exception e)
             {
                 logger.LogError(e, "Exception during migration {Transaction}, rolling back...!", name);
-                transaction.Rollback(name);
+                Transaction.Rollback(name);
                 success = false;
                 break;
             }
         }
 
         logger.LogInformation("Committing migrations");
-        transaction.Commit();
+        Transaction.Commit();
         return success;
     }
 

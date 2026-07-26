@@ -1,8 +1,8 @@
-﻿using Robust.Cdn.Services;
+using Robust.Cdn.Services;
 
 namespace Robust.Cdn.Config;
 
-public sealed class CdnOptions
+public sealed class CdnOptions : IDatabaseOptions
 {
     public const string Position = "Cdn";
 

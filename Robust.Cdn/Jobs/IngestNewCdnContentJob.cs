@@ -1,15 +1,13 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.IO.Compression;
 using System.Text;
-using Dapper;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using Quartz;
 using Robust.Cdn.Config;
+using Robust.Cdn.DataAccessLayer;
 using Robust.Cdn.Helpers;
 using Robust.Cdn.Lib;
 using SpaceWizards.Sodium;
-using SQLitePCL;
 
 namespace Robust.Cdn.Jobs;
 
@@ -38,39 +36,34 @@ public sealed class IngestNewCdnContentJob(
 
         var forkConfig = manifestOptions.Value.Forks[fork];
 
-        var connection = cdnDatabase.Connection;
-        var transaction = connection.BeginTransaction();
+        cdnDatabase.StartTransaction();
 
         List<string> newVersions;
         try
         {
-            newVersions = FindNewVersions(fork, connection);
+            newVersions = FindNewVersions(fork);
 
             if (newVersions.Count == 0)
                 return;
 
             IngestNewVersions(
                 fork,
-                connection,
                 newVersions,
-                ref transaction,
                 forkConfig,
-                context.CancellationToken);
+                context.CancellationToken
+            );
 
             logger.LogDebug("Committing database");
 
-            transaction.Commit();
+            cdnDatabase.ReleaseContentBlob();
+            cdnDatabase.Commit();
         }
         finally
         {
-            transaction.Dispose();
+            cdnDatabase.Dispose();
         }
 
-        await QueueManifestAvailable(fork, newVersions);
-    }
-
-    private async Task QueueManifestAvailable(string fork, IEnumerable<string> newVersions)
-    {
+        // Queue manifest available job
         var scheduler = await schedulerFactory.GetScheduler();
         await scheduler.TriggerJob(
             MakeNewManifestVersionsAvailableJob.Key,
@@ -79,26 +72,13 @@ public sealed class IngestNewCdnContentJob(
 
     private void IngestNewVersions(
         string fork,
-        SqliteConnection connection,
         List<string> newVersions,
-        ref SqliteTransaction transaction,
         ManifestForkOptions forkConfig,
         CancellationToken cancel)
     {
         var cdnOpts = cdnOptions.Value;
-        var manifestOpts = manifestOptions.Value;
 
-        var forkId = EnsureForkCreated(fork, connection);
-
-        using var stmtLookupContent = connection.Handle!.Prepare("SELECT Id FROM Content WHERE Hash = ?");
-        using var stmtInsertContent = connection.Handle!.Prepare(
-            "INSERT INTO Content (Hash, Size, Compression, Data) " +
-            "VALUES (@Hash, @Size, @Compression, @Data) " +
-            "RETURNING Id");
-
-        using var stmtInsertContentManifestEntry = connection.Handle!.Prepare(
-            "INSERT INTO ContentManifestEntry (VersionId, ManifestIdx, ContentId) " +
-            "VALUES (@VersionId, @ManifestIdx, @ContentId) ");
+        var forkId = cdnDatabase.EnsureForkCreated(fork);
 
         var hash = new byte[32];
 
@@ -106,7 +86,6 @@ public sealed class IngestNewCdnContentJob(
         var compressBuffer = ArrayPool<byte>.Shared.Rent(1024);
 
         using var compressor = new ZStdCompressionContext();
-        SqliteBlobStream? blob = null;
 
         try
         {
@@ -117,24 +96,17 @@ public sealed class IngestNewCdnContentJob(
                 {
                     logger.LogDebug("Doing interim commit");
 
-                    blob?.Dispose();
-                    blob = null;
-
-                    transaction.Commit();
-                    transaction = connection.BeginTransaction();
+                    cdnDatabase.ReleaseContentBlob();
+                    cdnDatabase.Commit();
+                    cdnDatabase.StartTransaction();
                 }
 
                 cancel.ThrowIfCancellationRequested();
 
                 logger.LogInformation("Ingesting new version: {Version}", version);
 
-                var versionId = connection.ExecuteScalar<long>(
-                    "INSERT INTO ContentVersion (ForkId, Version, TimeAdded, ManifestHash, ManifestData, CountDistinctBlobs) " +
-                    "VALUES (@ForkId, @Version, datetime('now'), zeroblob(0), zeroblob(0), 0) " +
-                    "RETURNING Id",
-                    new { Version = version, ForkId = forkId });
+                var versionId = cdnDatabase.InsertContentVersionAndGetId(forkId, version);
 
-                stmtInsertContentManifestEntry.BindInt64(1, versionId);
 
                 var zipFilePath = buildDirectoryManager.GetBuildVersionFilePath(
                     fork,
@@ -173,13 +145,9 @@ public sealed class IngestNewCdnContentJob(
                     CryptoGenericHashBlake2B.Hash(hash, readData, ReadOnlySpan<byte>.Empty);
 
                     // Look up if we already have this blob.
-                    stmtLookupContent.BindBlob(1, hash);
-
-                    long contentId;
-                    if (stmtLookupContent.Step() == raw.SQLITE_DONE)
+                    var contentId = cdnDatabase.FindContentByHash(hash);
+                    if (contentId == null)
                     {
-                        stmtLookupContent.Reset();
-
                         // Don't have this blob yet, add a new one!
                         newBlobCount += 1;
 
@@ -214,49 +182,13 @@ public sealed class IngestNewCdnContentJob(
                             writeData = readData;
                         }
 
-                        // Insert blob database.
-
-                        stmtInsertContent.BindBlob(1, hash); // @Hash
-                        stmtInsertContent.BindInt(2, dataLength); // @Size
-                        stmtInsertContent.BindInt(3, (int)compression); // @Compression
-                        stmtInsertContent.BindZeroBlob(4, writeData.Length); // @Data
-
-                        stmtInsertContent.Step();
-
-                        contentId = stmtInsertContent.ColumnInt64(0);
-
-                        stmtInsertContent.Reset();
-
-                        if (blob == null)
-                        {
-                            blob = SqliteBlobStream.Open(
-                                connection.Handle!,
-                                "main",
-                                "Content",
-                                "Data",
-                                contentId,
-                                true);
-                        }
-                        else
-                        {
-                            blob.Reopen(contentId);
-                        }
-
-                        blob.Write(writeData);
-                    }
-                    else
-                    {
-                        contentId = stmtLookupContent.ColumnInt64(0);
-
-                        stmtLookupContent.Reset();
+                        // Insert blob database and write its data.
+                        contentId = cdnDatabase.InsertContent(hash, dataLength, compression, writeData.Length);
+                        cdnDatabase.WriteContentBlob(contentId.Value, writeData);
                     }
 
                     // Insert into ContentManifestEntry
-                    stmtInsertContentManifestEntry.BindInt64(2, idx); // @ManifestIdx
-                    stmtInsertContentManifestEntry.BindInt64(3, contentId); // @ContentId
-
-                    stmtInsertContentManifestEntry.Step();
-                    stmtInsertContentManifestEntry.Reset();
+                    cdnDatabase.InsertContentManifestEntry(versionId, idx, contentId.Value);
 
                     // Write manifest entry.
                     manifestWriter.Write($"{Convert.ToHexString(hash)} {entry.FullName}\n");
@@ -289,54 +221,25 @@ public sealed class IngestNewCdnContentJob(
 
                     var compressedData = compressBuffer.AsSpan(0, compressedLength);
 
-                    connection.Execute(
-                        "UPDATE ContentVersion " +
-                        "SET ManifestHash = @ManifestHash, ManifestData = zeroblob(@ManifestDataSize) " +
-                        "WHERE Id = @VersionId",
-                        new
-                        {
-                            VersionId = versionId,
-                            ManifestHash = manifestHash,
-                            ManifestDataSize = compressedLength
-                        });
-
-                    using var manifestBlob = SqliteBlobStream.Open(
-                        connection.Handle!,
-                        "main",
-                        "ContentVersion",
-                        "ManifestData",
-                        versionId,
-                        true);
-
-                    manifestBlob.Write(compressedData);
+                    cdnDatabase.UpdateContentVersionData(versionId, manifestHash, compressedLength);
+                    cdnDatabase.WriteManifestBlob(versionId, compressedData);
                 }
 
                 // Calculate CountBlobsDeduplicated on ContentVersion
-
-                connection.Execute(
-                    "UPDATE ContentVersion AS cv " +
-                    "SET CountDistinctBlobs = " +
-                    "   (SELECT COUNT(DISTINCT cme.ContentId) FROM ContentManifestEntry cme WHERE cme.VersionId = cv.Id) " +
-                    "WHERE cv.Id = @VersionId",
-                    new { VersionId = versionId }
-                );
+                cdnDatabase.RefreshCountDistinctBlobs(versionId);
 
                 versionIdx += 1;
             }
         }
         finally
         {
-            blob?.Dispose();
-
             ArrayPool<byte>.Shared.Return(readBuffer);
             ArrayPool<byte>.Shared.Return(compressBuffer);
         }
     }
 
-    private List<string> FindNewVersions(string fork, SqliteConnection con)
+    private List<string> FindNewVersions(string fork)
     {
-        using var stmtCheckVersion = con.Handle!.Prepare("SELECT 1 FROM ContentVersion WHERE Version = ?");
-
         var newVersions = new List<(string, DateTime)>();
 
         var dir = buildDirectoryManager.GetForkPath(fork);
@@ -351,10 +254,7 @@ public sealed class IngestNewCdnContentJob(
             logger.LogTrace("Found version directory: {VersionDir}, write time: {WriteTime}", versionDirectory,
                 createdTime);
 
-            stmtCheckVersion.Reset();
-            stmtCheckVersion.BindString(1, version);
-
-            if (stmtCheckVersion.Step() == raw.SQLITE_ROW)
+            if (cdnDatabase.IsVersionExisting(version))
             {
                 // Already have version, skip.
                 logger.LogTrace("Already have version: {Version}", version);
@@ -374,18 +274,5 @@ public sealed class IngestNewCdnContentJob(
         }
 
         return newVersions.OrderByDescending(x => x.Item2).Select(x => x.Item1).ToList();
-    }
-
-    private static int EnsureForkCreated(string fork, SqliteConnection connection)
-    {
-        var id = connection.QuerySingleOrDefault<int?>(
-            "SELECT Id FROM Fork WHERE Name = @Name",
-            new { Name = fork });
-
-        id ??= connection.QuerySingle<int>(
-            "INSERT INTO Fork (Name) VALUES (@Name) RETURNING Id",
-            new { Name = fork });
-
-        return id.Value;
     }
 }

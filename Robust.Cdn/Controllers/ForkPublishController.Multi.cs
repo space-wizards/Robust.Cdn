@@ -1,5 +1,5 @@
-using Dapper;
 using Microsoft.AspNetCore.Mvc;
+using Robust.Cdn.DataAccessLayer.Models;
 using Robust.Cdn.Helpers;
 
 namespace Robust.Cdn.Controllers;
@@ -23,44 +23,36 @@ public sealed partial class ForkPublishController
         if (!ValidVersionRegex.IsMatch(request.Version))
             return BadRequest("Invalid version name");
 
-        if (VersionAlreadyExists(fork, request.Version))
+        manifestDatabase.StartTransaction();
+
+        if (manifestDatabase.IsVersionExists(fork, request.Version))
             return Conflict("Version already exists");
-
-        var dbCon = manifestDatabase.Connection;
-
-        await using var tx = await dbCon.BeginTransactionAsync(cancel);
 
         logger.LogInformation("Starting multi publish for fork {Fork} version {Version}", fork, request.Version);
 
-        var forkId = dbCon.QuerySingle<int>("SELECT Id FROM Fork WHERE Name = @Name", new { Name = fork });
-        var hasExistingPublish = dbCon.QuerySingleOrDefault<bool>(
-            "SELECT 1 FROM PublishInProgress WHERE Version = @Version AND ForkId = @ForkId",
-            new { request.Version, ForkId = forkId });
-        if (hasExistingPublish)
+        var forkId = manifestDatabase.GetForkIdByName(fork);
+        var isPublishInProgress = manifestDatabase.IsPublishInProgress(forkId, request.Version);
+        if (isPublishInProgress)
         {
             // If a publish with this name already exists we abort it and start again.
             // We do this so you can "just" retry a mid-way-failed publish without an extra API call required.
 
             logger.LogWarning("Already had an in-progress publish for this version, aborting it and restarting.");
-            publishManager.AbortMultiPublish(fork, request.Version, tx, commit: false);
+            publishManager.AbortMultiPublish(fork, request.Version);
         }
 
-        await dbCon.ExecuteAsync("""
-            INSERT INTO PublishInProgress (Version, ForkId, StartTime, EngineVersion)
-            VALUES (@Version, @ForkId, @StartTime, @EngineVersion)
-            """,
-            new
-            {
-                request.Version,
-                request.EngineVersion,
-                ForkId = forkId,
-                StartTime = DateTime.UtcNow
-            });
+        manifestDatabase.InsertPublishInProgress(
+            request.Version,
+            request.EngineVersion,
+            forkId,
+            new SourceVersionInfo(request.SourceUrl, request.SourceCommitId, request.SourceBranchName),
+            new SourceVersionInfo(request.EngineSourceUrl, request.EngineSourceCommitId, request.EngineSourceBranchName)
+        );
 
         var versionDir = buildDirectoryManager.GetBuildVersionPath(fork, request.Version);
         Directory.CreateDirectory(versionDir);
 
-        await tx.CommitAsync(cancel);
+        manifestDatabase.Commit();
 
         logger.LogInformation("Multi publish initiated. Waiting for subsequent API requests...");
 
@@ -83,18 +75,11 @@ public sealed partial class ForkPublishController
         if (!ValidFileRegex.IsMatch(fileName))
             return BadRequest("Invalid artifact file name");
 
-        var dbCon = manifestDatabase.Connection;
-        await using var tx = await dbCon.BeginTransactionAsync(cancel);
+        manifestDatabase.StartTransaction();
 
-        var forkId = dbCon.QuerySingle<int>("SELECT Id FROM Fork WHERE Name = @Name", new { Name = fork });
-        var versionId = dbCon.QuerySingleOrDefault<int?>("""
-            SELECT Id
-            FROM PublishInProgress
-            WHERE Version = @Name AND ForkId = @Fork
-            """,
-            new { Name = version, Fork = forkId });
-
-        if (versionId == null)
+        var forkId = manifestDatabase.GetForkIdByName(fork);
+        var isPublishInProgress = manifestDatabase.IsPublishInProgress(forkId, version);
+        if (!isPublishInProgress)
             return NotFound("Unknown in-progress version");
 
         var versionDir = buildDirectoryManager.GetBuildVersionPath(fork, version);
@@ -123,17 +108,10 @@ public sealed partial class ForkPublishController
         if (!authHelper.IsAuthValid(fork, out var forkConfig, out var failureResult))
             return failureResult;
 
-        var dbCon = manifestDatabase.Connection;
-        await using var tx = await dbCon.BeginTransactionAsync(cancel);
+        manifestDatabase.StartTransaction();
 
-        var forkId = dbCon.QuerySingle<int>("SELECT Id FROM Fork WHERE Name = @Name", new { Name = fork });
-        var versionMetadata = dbCon.QuerySingleOrDefault<VersionMetadata>("""
-            SELECT Version, EngineVersion
-            FROM PublishInProgress
-            WHERE Version = @Name AND ForkId = @Fork
-            """,
-            new { Name = request.Version, Fork = forkId });
-
+        var forkId = manifestDatabase.GetForkIdByName(fork);
+        var versionMetadata = manifestDatabase.GetVersionMetadata(forkId, request.Version);
         if (versionMetadata == null)
             return NotFound("Unknown in-progress version");
 
@@ -151,7 +129,8 @@ public sealed partial class ForkPublishController
         var clientArtifact = artifacts.SingleOrNull(art => art.artifact.Type == ArtifactType.Client);
         if (clientArtifact == null)
         {
-            publishManager.AbortMultiPublish(fork, request.Version, tx, commit: true);
+            publishManager.AbortMultiPublish(fork, request.Version);
+            manifestDatabase.Commit();
             return UnprocessableEntity("Publish failed: no client zip was provided");
         }
 
@@ -160,13 +139,11 @@ public sealed partial class ForkPublishController
         var buildJson = GenerateBuildJson(diskFiles, clientArtifact.Value.artifact, versionMetadata, fork);
         InjectBuildJsonIntoServers(diskFiles, buildJson);
 
-        AddVersionToDatabase(clientArtifact.Value.artifact, diskFiles, fork, versionMetadata);
+        manifestDatabase.AddVersionsToDatabase(clientArtifact.Value.artifact, diskFiles, fork, versionMetadata);
 
-        dbCon.Execute(
-            "DELETE FROM PublishInProgress WHERE Version = @Name AND ForkId = @Fork",
-            new { Name = request.Version, Fork = forkId });
+        manifestDatabase.DeleteVersionByVersionName(fork, request.Version);
 
-        tx.Commit();
+        manifestDatabase.Commit();
 
         await QueueIngestJobAsync(fork);
 
@@ -175,11 +152,10 @@ public sealed partial class ForkPublishController
         return NoContent();
     }
 
-    public sealed class PublishMultiRequest
-    {
-        public required string Version { get; set; }
-        public required string EngineVersion { get; set; }
-    }
+    /// <summary>
+    /// Request for start of multi-step publishing process of a new version.
+    /// </summary>
+    public sealed class PublishMultiRequest : PublishStartRequestBase;
 
     public sealed class PublishFinishRequest
     {

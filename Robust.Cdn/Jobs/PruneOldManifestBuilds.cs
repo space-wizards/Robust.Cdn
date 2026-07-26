@@ -1,7 +1,8 @@
-﻿using Dapper;
+using Dapper;
 using Microsoft.Extensions.Options;
 using Quartz;
 using Robust.Cdn.Config;
+using Robust.Cdn.DataAccessLayer;
 
 namespace Robust.Cdn.Jobs;
 
@@ -58,13 +59,7 @@ public sealed class PruneOldManifestBuilds(
 
         var pruneFrom = DateTime.UtcNow - TimeSpan.FromDays(forkConfig.PruneBuildsDays);
 
-        var builds = manifestDatabase.Connection.Query<VersionData>("""
-            SELECT FV.Id, FV.Name
-            FROM ForkVersion FV, Fork
-            WHERE FV.ForkId = Fork.Id
-              AND Fork.Name = @ForkName
-              AND FV.PublishedTime < @PruneFrom
-            """, new { ForkName = forkName, PruneFrom = pruneFrom });
+        var builds = manifestDatabase.QueryVersionOlderThen(forkName, pruneFrom);
 
         var total = 0;
         foreach (var versionData in builds)
@@ -84,16 +79,11 @@ public sealed class PruneOldManifestBuilds(
                 logger.LogTrace("Version directory didn't exist when cleaning it up ({Directory})", directory);
             }
 
-            manifestDatabase.Connection.Execute("DELETE FROM ForkVersion WHERE Id = @Id", versionData);
+            manifestDatabase.DeleteVersion(versionData.Id);
             total += 1;
         }
 
         return total;
     }
 
-    private sealed class VersionData
-    {
-        public required int Id { get; set; }
-        public required string Name { get; set; }
-    }
 }

@@ -1,4 +1,4 @@
-﻿namespace Robust.Cdn.Helpers;
+namespace Robust.Cdn.Helpers;
 
 public static class StreamHelpers
 {
@@ -13,5 +13,4 @@ public static class StreamHelpers
             buffer = buffer[cRead..];
         }
     }
-
 }

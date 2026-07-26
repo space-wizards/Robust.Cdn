@@ -1,12 +1,13 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Dapper;
 using Microsoft.AspNetCore.Mvc;
 using Quartz;
 using Robust.Cdn.Config;
+using Robust.Cdn.DataAccessLayer;
+using Robust.Cdn.DataAccessLayer.Models;
 using Robust.Cdn.Helpers;
 using Robust.Cdn.Jobs;
 using Robust.Cdn.Services;
@@ -50,28 +51,12 @@ public sealed partial class ForkPublishController(
 
     public const string PublishFetchHttpClient = "PublishFetch";
 
-    private bool VersionAlreadyExists(string fork, string version)
-    {
-        return manifestDatabase.Connection.QuerySingleOrDefault<bool>(
-            """
-            SELECT 1
-            FROM Fork, ForkVersion
-            WHERE Fork.Id = ForkVersion.ForkId
-              AND Fork.Name = @ForkName
-              AND ForkVersion.Name = @ForkVersion
-            """, new
-            {
-                ForkName = fork,
-                ForkVersion = version
-            });
-    }
-
-    private List<(T key, Artifact artifact)> ClassifyEntries<T>(
+    private List<(T key, ArtifactBriefInfo artifact)> ClassifyEntries<T>(
         ManifestForkOptions forkConfig,
         IEnumerable<T> items,
         Func<T, string> getName)
     {
-        var list = new List<(T, Artifact)>();
+        var list = new List<(T, ArtifactBriefInfo)>();
 
         foreach (var item in items)
         {
@@ -93,15 +78,15 @@ public sealed partial class ForkPublishController(
         return list;
     }
 
-    private static Artifact? ClassifyEntry(ManifestForkOptions forkConfig, string name)
+    private static ArtifactBriefInfo? ClassifyEntry(ManifestForkOptions forkConfig, string name)
     {
         if (name == $"{forkConfig.ClientZipName}.zip")
-            return new Artifact { Type = ArtifactType.Client };
+            return new ArtifactBriefInfo { Type = ArtifactType.Client };
 
         if (name.StartsWith(forkConfig.ServerZipName) && name.EndsWith(".zip"))
         {
             var rid = name[forkConfig.ServerZipName.Length..^".zip".Length];
-            return new Artifact
+            return new ArtifactBriefInfo
             {
                 Platform = rid,
                 Type = ArtifactType.Server
@@ -112,14 +97,14 @@ public sealed partial class ForkPublishController(
     }
 
     private MemoryStream GenerateBuildJson(
-        Dictionary<Artifact, string> diskFiles,
-        Artifact clientArtifact,
+        Dictionary<ArtifactBriefInfo, string> diskFiles,
+        ArtifactBriefInfo clientArtifactBriefInfo,
         VersionMetadata metadata,
         string forkName)
     {
         logger.LogDebug("Generating build.json contents");
 
-        var diskPath = diskFiles[clientArtifact];
+        var diskPath = diskFiles[clientArtifactBriefInfo];
 
         var diskFileName = Path.GetFileName(diskPath);
         using var file = System.IO.File.OpenRead(diskPath);
@@ -132,7 +117,7 @@ public sealed partial class ForkPublishController(
 
         logger.LogDebug("Client zip hash is {ZipHash}, manifest hash is {ManifestHash}", hash, manifestHash);
 
-        var data = new Dictionary<string, string>
+        var data = new Dictionary<string, string?>
         {
             { "download", baseUrlManager.MakeBuildInfoUrl($"fork/{{FORK_ID}}/version/{{FORK_VERSION}}/file/{diskFileName}") },
             { "version", metadata.Version },
@@ -141,7 +126,13 @@ public sealed partial class ForkPublishController(
             { "engine_version", metadata.EngineVersion },
             { "manifest_url", baseUrlManager.MakeBuildInfoUrl("fork/{FORK_ID}/version/{FORK_VERSION}/manifest") },
             { "manifest_download_url", baseUrlManager.MakeBuildInfoUrl("fork/{FORK_ID}/version/{FORK_VERSION}/download") },
-            { "manifest_hash", manifestHash }
+            { "manifest_hash", manifestHash },
+            { "built_on_source_url", metadata.BuildVersionInfo.SourceUrl },
+            { "built_on_commit_id", metadata.BuildVersionInfo.CommitId },
+            { "built_on_branch_name", metadata.BuildVersionInfo.BranchName},
+            { "built_on_engine_url", metadata.EngineSourceVersionInfo.SourceUrl },
+            { "built_on_engine_commit_id", metadata.EngineSourceVersionInfo.CommitId },
+            { "built_on_engine_branch_name", metadata.EngineSourceVersionInfo.BranchName },
         };
 
         var stream = new MemoryStream();
@@ -185,7 +176,7 @@ public sealed partial class ForkPublishController(
         return HashHelper.HashBlake2B(stream);
     }
 
-    private void InjectBuildJsonIntoServers(Dictionary<Artifact, string> diskFiles, MemoryStream buildJson)
+    private void InjectBuildJsonIntoServers(Dictionary<ArtifactBriefInfo, string> diskFiles, MemoryStream buildJson)
     {
         logger.LogDebug("Adding build.json to server builds");
 
@@ -213,63 +204,7 @@ public sealed partial class ForkPublishController(
         }
     }
 
-    private void AddVersionToDatabase(
-        Artifact clientArtifact,
-        Dictionary<Artifact, string> diskFiles,
-        string fork,
-        VersionMetadata metadata)
-    {
-        logger.LogDebug("Adding new version to database");
 
-        var dbCon = manifestDatabase.Connection;
-
-        var forkId = dbCon.QuerySingle<int>("SELECT Id FROM Fork WHERE Name = @Name", new { Name = fork });
-
-        var (clientName, clientSha256, _) = GetFileNameSha256Pair(diskFiles[clientArtifact]);
-
-        var versionId = dbCon.QuerySingle<int>("""
-            INSERT INTO ForkVersion (Name, ForkId, PublishedTime, ClientFileName, ClientSha256, EngineVersion)
-            VALUES (@Name, @ForkId, @PublishTime, @ClientName, @ClientSha256, @EngineVersion)
-            RETURNING Id
-            """,
-            new
-            {
-                Name = metadata.Version,
-                ForkId = forkId,
-                ClientName = clientName,
-                ClientSha256 = clientSha256,
-                metadata.EngineVersion,
-                PublishTime = DateTime.UtcNow
-            });
-
-        foreach (var (artifact, diskPath) in diskFiles)
-        {
-            if (artifact.Type != ArtifactType.Server)
-                continue;
-
-            var (serverName, serverSha256, fileSize) = GetFileNameSha256Pair(diskPath);
-
-            dbCon.Execute("""
-                INSERT INTO ForkVersionServerBuild (ForkVersionId, Platform, FileName, Sha256, FileSize)
-                VALUES (@ForkVersion, @Platform, @ServerName, @ServerSha256, @FileSize)
-                """,
-                new
-                {
-                    ForkVersion = versionId,
-                    artifact.Platform,
-                    ServerName = serverName,
-                    ServerSha256 = serverSha256,
-                    FileSize = fileSize
-                });
-        }
-    }
-
-    private static (string name, byte[] hash, long size) GetFileNameSha256Pair(string diskPath)
-    {
-        using var file = System.IO.File.OpenRead(diskPath);
-
-        return (Path.GetFileName(diskPath), SHA256.HashData(file), file.Length);
-    }
 
     private async Task QueueIngestJobAsync(string fork)
     {
@@ -290,18 +225,65 @@ public sealed partial class ForkPublishController(
             FileOptions.DeleteOnClose);
     }
 
-    public sealed class PublishRequest
+    /// <summary>
+    /// Base type with publish start info.
+    /// </summary>
+    public abstract class PublishStartRequestBase
     {
+        /// <summary>
+        /// Human-readable version of the build. This is used to identify the build in the CDN and in the game client.
+        /// </summary>
         public required string Version { get; set; }
+
+        /// <summary>
+        /// Human-readable version of the engine used to build this version.
+        /// </summary>
         public required string EngineVersion { get; set; }
+
+        /// <summary>
+        /// URL of the fork repository. Optional, but useful for debugging.
+        /// </summary>
+        public string? SourceUrl { get; set; }
+
+        /// <summary>
+        /// Commit ID on which version was built. Optional, but useful for debugging.
+        /// </summary>
+        public string? SourceCommitId { get; set; }
+
+        /// <summary>
+        /// Branch on which version was built. Optional, but useful for debugging.
+        /// </summary>
+        public string? SourceBranchName { get; set; }
+
+        /// <summary>
+        /// Url for RobustToolbox repository (or its fork), used for this version. Optional, but useful for debugging.
+        /// </summary>
+        public string? EngineSourceUrl { get; set; }
+
+        /// <summary>
+        /// Branch on which RobustToolbox for this version was built. Optional, but useful for debugging.
+        /// </summary>
+        public string? EngineSourceBranchName { get; set; }
+
+        /// <summary>
+        /// Commit ID of RobustToolbox, used for this version. Optional, but useful for debugging.
+        /// </summary>
+        public string? EngineSourceCommitId { get; set; }
+    }
+
+    /// <summary>
+    /// Request for one-shot publishing of a new version.
+    /// </summary>
+    /// <seealso cref="ForkPublishController.PostPublish"/>
+    public sealed class PublishRequest : PublishStartRequestBase
+    {
+        /// <summary>
+        /// Uri for new build artifact.
+        /// </summary>
         public required string Archive { get; set; }
     }
 
-    private sealed class VersionMetadata
-    {
-        public required string Version { get; init; }
-        public required string EngineVersion { get; set; }
-    }
+
 
     // File cannot start with a dot but otherwise most shit is fair game.
     [GeneratedRegex(@"[a-zA-Z0-9\-_][a-zA-Z0-9\-_.]*")]
@@ -310,15 +292,4 @@ public sealed partial class ForkPublishController(
     [GeneratedRegex(@"[a-zA-Z0-9\-_][a-zA-Z0-9\-_.]*")]
     private static partial Regex ValidFileRegexBuilder();
 
-    private sealed class Artifact
-    {
-        public ArtifactType Type { get; set; }
-        public string? Platform { get; set; }
-    }
-
-    private enum ArtifactType
-    {
-        Server,
-        Client
-    }
 }

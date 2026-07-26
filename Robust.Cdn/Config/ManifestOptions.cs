@@ -1,6 +1,6 @@
-﻿namespace Robust.Cdn.Config;
+namespace Robust.Cdn.Config;
 
-public sealed class ManifestOptions
+public sealed class ManifestOptions : IDatabaseOptions
 {
     public const string Position = "Manifest";
 
