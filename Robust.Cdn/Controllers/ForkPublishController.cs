@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -132,7 +132,7 @@ public sealed partial class ForkPublishController(
 
         logger.LogDebug("Client zip hash is {ZipHash}, manifest hash is {ManifestHash}", hash, manifestHash);
 
-        var data = new Dictionary<string, string>
+        var data = new Dictionary<string, string?>
         {
             { "download", baseUrlManager.MakeBuildInfoUrl($"fork/{{FORK_ID}}/version/{{FORK_VERSION}}/file/{diskFileName}") },
             { "version", metadata.Version },
@@ -141,7 +141,13 @@ public sealed partial class ForkPublishController(
             { "engine_version", metadata.EngineVersion },
             { "manifest_url", baseUrlManager.MakeBuildInfoUrl("fork/{FORK_ID}/version/{FORK_VERSION}/manifest") },
             { "manifest_download_url", baseUrlManager.MakeBuildInfoUrl("fork/{FORK_ID}/version/{FORK_VERSION}/download") },
-            { "manifest_hash", manifestHash }
+            { "manifest_hash", manifestHash },
+            { "built_on_source_url", metadata.BuildVersionInfo.SourceUrl },
+            { "built_on_commit_id", metadata.BuildVersionInfo.CommitId },
+            { "built_on_branch_name", metadata.BuildVersionInfo.BranchName},
+            { "built_on_engine_url", metadata.EngineSourceVersionInfo.SourceUrl },
+            { "built_on_engine_commit_id", metadata.EngineSourceVersionInfo.CommitId },
+            { "built_on_engine_branch_name", metadata.EngineSourceVersionInfo.BranchName },
         };
 
         var stream = new MemoryStream();
@@ -290,18 +296,122 @@ public sealed partial class ForkPublishController(
             FileOptions.DeleteOnClose);
     }
 
-    public sealed class PublishRequest
+    /// <summary>
+    /// Base type with publish start info.
+    /// </summary>
+    public abstract class PublishStartRequestBase
     {
+        /// <summary>
+        /// Human-readable version of the build. This is used to identify the build in the CDN and in the game client.
+        /// </summary>
         public required string Version { get; set; }
+
+        /// <summary>
+        /// Human-readable version of the engine used to build this version.
+        /// </summary>
         public required string EngineVersion { get; set; }
+
+        /// <summary>
+        /// URL of the fork repository. Optional, but useful for debugging.
+        /// </summary>
+        public string? SourceUrl { get; set; }
+
+        /// <summary>
+        /// Commit ID on which version was built. Optional, but useful for debugging.
+        /// </summary>
+        public string? SourceCommitId { get; set; }
+
+        /// <summary>
+        /// Branch on which version was built. Optional, but useful for debugging.
+        /// </summary>
+        public string? SourceBranchName { get; set; }
+
+        /// <summary>
+        /// Url for RobustToolbox repository (or its fork), used for this version. Optional, but useful for debugging.
+        /// </summary>
+        public string? EngineSourceUrl { get; set; }
+
+        /// <summary>
+        /// Branch on which RobustToolbox for this version was built. Optional, but useful for debugging.
+        /// </summary>
+        public string? EngineSourceBranchName { get; set; }
+
+        /// <summary>
+        /// Commit ID of RobustToolbox, used for this version. Optional, but useful for debugging.
+        /// </summary>
+        public string? EngineSourceCommitId { get; set; }
+    }
+
+    /// <summary>
+    /// Request for one-shot publishing of a new version.
+    /// </summary>
+    /// <seealso cref="ForkPublishController.PostPublish"/>
+    public sealed class PublishRequest : PublishStartRequestBase
+    {
+        /// <summary>
+        /// Uri for new build artifact.
+        /// </summary>
         public required string Archive { get; set; }
     }
 
+    /// <summary>
+    /// Build version metadata.
+    /// </summary>
     private sealed class VersionMetadata
     {
-        public required string Version { get; init; }
-        public required string EngineVersion { get; set; }
+        public VersionMetadata(string version, string engineVersion, SourceVersionInfo buildVersionInfo, SourceVersionInfo engineSourceVersionInfo)
+        {
+            Version = version;
+            EngineVersion = engineVersion;
+            BuildVersionInfo = buildVersionInfo;
+            EngineSourceVersionInfo = engineSourceVersionInfo;
+        }
+
+        public VersionMetadata(
+            string version,
+            string engineVersion,
+            string? sourceUrl,
+            string? sourceCommitId,
+            string? sourceBranchName,
+            string? engineSourceUrl,
+            string? engineSourceCommitId,
+            string? engineSourceBranchName
+        )
+        {
+            Version = version;
+            EngineVersion = engineVersion;
+            BuildVersionInfo = new SourceVersionInfo(sourceUrl, sourceCommitId, sourceBranchName);
+            EngineSourceVersionInfo = new SourceVersionInfo(engineSourceUrl, engineSourceCommitId, engineSourceBranchName);
+        }
+
+        /// <summary>
+        /// Human-readable version of the build. This is used to identify the build in the CDN and in the game client.
+        /// </summary>
+        public string Version { get; }
+
+        /// <summary>
+        /// Human-readable version of the engine used to build this version.
+        /// </summary>
+        public string EngineVersion { get; }
+
+        /// <summary>
+        /// Version info for sources, used for build.
+        /// </summary>
+        public SourceVersionInfo BuildVersionInfo { get; }
+
+        /// <summary>
+        /// Version info for sources of engine, used for build.
+        /// </summary>
+        public SourceVersionInfo EngineSourceVersionInfo { get; }
     }
+
+    /// <summary>
+    /// Detailed info on sources used for building version.
+    /// </summary>
+    /// <param name="SourceUrl">URL for repository that holds sources.</param>
+    /// <param name="CommitId">Commit ID used for building sources.</param>
+    /// <param name="BranchName">Branch name or tag, used for building sources.</param>
+    public record SourceVersionInfo(string? SourceUrl, string? CommitId, string? BranchName);
 
     // File cannot start with a dot but otherwise most shit is fair game.
     [GeneratedRegex(@"[a-zA-Z0-9\-_][a-zA-Z0-9\-_.]*")]
