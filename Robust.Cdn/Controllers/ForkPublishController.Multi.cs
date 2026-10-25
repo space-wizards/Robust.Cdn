@@ -47,7 +47,7 @@ public sealed partial class ForkPublishController
 
         await dbCon.ExecuteAsync("""
             INSERT INTO PublishInProgress (Version, ForkId, StartTime, EngineVersion, SourceUrl, SourceCommitId, SourceBranchName, EngineSourceUrl, EngineSourceCommitId, EngineSourceBranchName)
-            VALUES (@Version, @ForkId, @StartTime, @EngineVersion, @SourceUrl, @SourceCommitId, @SourceBranchName, @EngineSourceUrl, @EngineSourceCommitId, EngineSourceBranchName)
+            VALUES (@Version, @ForkId, @StartTime, @EngineVersion, @SourceUrl, @SourceCommitId, @SourceBranchName, @EngineSourceUrl, @EngineSourceCommitId, @EngineSourceBranchName)
             """,
             new
             {
