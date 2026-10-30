@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -13,6 +14,7 @@ namespace Robust.Cdn.Tests.Controllers;
 /// and <c>DownloadCompatibilityController</c> (via /version/{version}/...).
 /// </summary>
 [Trait("Category", "IntegrationTest")]
+[ExcludeFromCodeCoverage]
 public abstract class DownloadControllerTestBase(
     WebApplicationFactory<Program> factory, 
     DatabaseFixture database, 

@@ -1,6 +1,7 @@
+using Microsoft.AspNetCore.Mvc.Testing;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Text.Json;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit.Abstractions;
 
 namespace Robust.Cdn.Tests.Controllers;
@@ -11,6 +12,7 @@ namespace Robust.Cdn.Tests.Controllers;
 /// Endpoint: GET /control/status
 /// </summary>
 [Trait("Category", "Integration")]
+[ExcludeFromCodeCoverage]
 public sealed class StatusControllerTests(
     WebApplicationFactory<Program> factory, 
     DatabaseFixture database, 

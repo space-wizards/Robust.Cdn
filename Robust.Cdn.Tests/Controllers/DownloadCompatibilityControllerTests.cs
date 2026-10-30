@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc.Testing;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
 using Xunit.Abstractions;
@@ -13,6 +14,8 @@ namespace Robust.Cdn.Tests.Controllers;
 ///   OPTIONS /version/{version}/download
 ///   POST    /version/{version}/download
 /// </summary>
+[Trait("Category", "IntegrationTest")]
+[ExcludeFromCodeCoverage]
 public sealed class DownloadCompatibilityControllerTests(
     WebApplicationFactory<Program> factory,
     DatabaseFixture database, 

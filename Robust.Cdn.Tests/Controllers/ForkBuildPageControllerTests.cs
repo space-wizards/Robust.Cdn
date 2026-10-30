@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc.Testing;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
-using System.Security.Cryptography;
 using System.Text;
 using Xunit.Abstractions;
 
@@ -13,6 +13,7 @@ namespace Robust.Cdn.Tests.Controllers;
 /// Endpoint: GET /fork/{fork}
 /// </summary>
 [Trait("Category", "IntegrationTest")]
+[ExcludeFromCodeCoverage]
 public sealed class ForkBuildPageControllerTests(
     WebApplicationFactory<Program> factory,
     DatabaseFixture database,

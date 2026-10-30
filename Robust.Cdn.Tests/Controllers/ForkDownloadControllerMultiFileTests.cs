@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
 using Xunit.Abstractions;
@@ -12,6 +13,7 @@ namespace Robust.Cdn.Tests.Controllers;
 /// Endpoint: POST /fork/{fork}/version/{version}/download
 /// </summary>
 [Trait("Category", "IntegrationTest")]
+[ExcludeFromCodeCoverage]
 public sealed class ForkDownloadControllerMultiFileTests(
     WebApplicationFactory<Program> factory, 
     DatabaseFixture database, 

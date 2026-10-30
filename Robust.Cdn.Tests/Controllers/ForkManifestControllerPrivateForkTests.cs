@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc.Testing;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -7,6 +8,7 @@ using Xunit.Abstractions;
 namespace Robust.Cdn.Tests.Controllers;
 
 [Trait("Category", "IntegrationTest")]
+[ExcludeFromCodeCoverage]
 public sealed class ForkManifestControllerPrivateForkTests(
     WebApplicationFactory<Program> factory,
     DatabaseFixture database, 

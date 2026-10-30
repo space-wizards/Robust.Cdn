@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
 
 namespace Robust.Cdn.Tests;
@@ -6,6 +7,7 @@ namespace Robust.Cdn.Tests;
 /// Collection fixture that tracks all temp database files created during a test collection
 /// and cleans them up when the collection is done.
 /// </summary>
+[ExcludeFromCodeCoverage]
 public sealed class DatabaseFixture : IDisposable
 {
     private readonly List<string> _tempFiles = new();

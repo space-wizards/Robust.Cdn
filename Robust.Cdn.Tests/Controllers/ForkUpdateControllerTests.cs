@@ -1,6 +1,7 @@
+using Microsoft.AspNetCore.Mvc.Testing;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit.Abstractions;
 
 namespace Robust.Cdn.Tests.Controllers;
@@ -11,6 +12,7 @@ namespace Robust.Cdn.Tests.Controllers;
 /// Endpoint: POST /fork/{fork}/control/update
 /// </summary>
 [Trait("Category", "IntegrationTest")]
+[ExcludeFromCodeCoverage]
 public sealed class ForkUpdateControllerTests(
     WebApplicationFactory<Program> factory,
     DatabaseFixture database,

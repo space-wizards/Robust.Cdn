@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc.Testing;
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
 using System.Net;
 using System.Text.Json;
@@ -7,6 +8,7 @@ using Xunit.Abstractions;
 namespace Robust.Cdn.Tests.Controllers;
 
 [Trait("Category", "IntegrationTest")]
+[ExcludeFromCodeCoverage]
 public sealed class ForkManifestControllerTests(
     WebApplicationFactory<Program> factory, 
     DatabaseFixture database, 
@@ -82,10 +84,10 @@ public sealed class ForkManifestControllerTests(
         Assert.True(c.TryGetProperty("sha256", out var clientHash));
         Assert.Matches("^[0-9A-F]{64}$", clientHash.GetString());
 
-        Assert.True(version.TryGetProperty("server", out var s));
-        Assert.Equal(2, s.GetPropertyCount());
+        Assert.True(version.TryGetProperty("server", out var srv));
+        Assert.Equal(2, srv.GetPropertyCount());
 
-        Assert.True(s.TryGetProperty("linux-x64", out var linux));
+        Assert.True(srv.TryGetProperty("linux-x64", out var linux));
         Assert.True(linux.TryGetProperty("url", out var linuxUrl));
         Assert.Equal($"http://localhost/fork/{ForkName}/version/{postVersion}/file/SS14.Server_linux-x64.zip", linuxUrl.GetString());
 
@@ -97,7 +99,7 @@ public sealed class ForkManifestControllerTests(
         Assert.True(linux.TryGetProperty("size", out var linuxSize));
         Assert.Equal(535, linuxSize.GetInt64());
 
-        Assert.True(s.TryGetProperty("win-x64", out var win));
+        Assert.True(srv.TryGetProperty("win-x64", out var win));
         Assert.True(win.TryGetProperty("url", out var winUrl));
         Assert.Equal($"http://localhost/fork/{ForkName}/version/{postVersion}/file/SS14.Server_win-x64.zip", winUrl.GetString());
 

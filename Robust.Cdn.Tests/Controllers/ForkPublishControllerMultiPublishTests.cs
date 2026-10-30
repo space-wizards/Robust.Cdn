@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Mvc.Testing;
 using System.IO.Compression;
 using System.Net;
@@ -13,6 +14,7 @@ namespace Robust.Cdn.Tests.Controllers;
 ///   POST /fork/{fork}/publish/finish
 /// </summary>
 [Trait("Category", "IntegrationTest")]
+[ExcludeFromCodeCoverage]
 public sealed class ForkPublishControllerMultiPublishTests(
     WebApplicationFactory<Program> factory,
     DatabaseFixture database,

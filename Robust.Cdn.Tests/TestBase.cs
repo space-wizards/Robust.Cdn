@@ -1,8 +1,8 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using Microsoft.AspNetCore.Mvc.Testing;
 using SharpZstd;
 using System.IO.Compression;
-using System.Net;
 using System.Net.Http.Headers;
 using Xunit.Abstractions;
 
@@ -13,6 +13,7 @@ namespace Robust.Cdn.Tests;
 /// and automatic cleanup of temp database files after the test collection finishes.
 /// </summary>
 [Collection("ControllerTests")]
+[ExcludeFromCodeCoverage]
 public abstract class TestBase : IClassFixture<DatabaseFixture>
 {
     protected static readonly DateTimeOffset FixedLastWriteTime = new(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);

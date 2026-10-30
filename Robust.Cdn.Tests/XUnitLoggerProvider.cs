@@ -1,7 +1,12 @@
+using System.Diagnostics.CodeAnalysis;
 using Xunit.Abstractions;
 
 namespace Robust.Cdn.Tests;
 
+/// <summary>
+/// Logging provider that enables outputting application logs into unit test runner output in IDE.
+/// </summary>
+[ExcludeFromCodeCoverage]
 public sealed class XUnitLoggerProvider(ITestOutputHelper testOutput) : ILoggerProvider
 {
     public ILogger CreateLogger(string categoryName) => new XUnitLogger(categoryName, testOutput);
