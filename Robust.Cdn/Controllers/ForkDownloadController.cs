@@ -1,9 +1,11 @@
 ﻿using System.Buffers.Binary;
 using System.Collections;
 using System.Diagnostics;
+using System.Globalization;
 using Dapper;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using Robust.Cdn.Config;
 using Robust.Cdn.Helpers;
@@ -27,6 +29,12 @@ public sealed class DownloadController(
     private const int MinDownloadProtocol = 1;
     private const int MaxDownloadProtocol = 1;
     private const int MaxDownloadRequestSize = 4 * 100_000;
+
+    /// <summary>
+    /// Optional response header of the download request, the total uncompressed size in bytes of the requested files.
+    /// Clients use it to show download progress in bytes. Not all servers send it, so clients must cope without it.
+    /// </summary>
+    private const string TotalSizeHeader = "X-Robust-Download-Total-Size";
 
     private readonly CdnOptions _options = options.Value;
 
@@ -145,6 +153,12 @@ public sealed class DownloadController(
             offset += 4;
             countFilesRequested += 1;
         }
+
+        // Tell the client how much data (uncompressed) it is about to receive, so it can show real progress.
+        // If a size can't be worked out for whatever reason the header is left out.
+        var totalSize = CalcTotalSize(con, versionId, buf);
+        if (totalSize > 0)
+            Response.Headers[TotalSizeHeader] = totalSize.Value.ToString(CultureInfo.InvariantCulture);
 
         var outStream = Response.Body;
 
@@ -317,6 +331,35 @@ public sealed class DownloadController(
         }
 
         return new NoOpActionResult();
+    }
+
+    /// <summary>
+    /// Adds up the uncompressed sizes of the requested manifest entries.
+    /// </summary>
+    /// <returns>The total in bytes, or null if an entry couldn't be found.</returns>
+    private static long? CalcTotalSize(SqliteConnection con, long versionId, Memory<byte> requestedIndices)
+    {
+        using var stmt = con.Handle!.Prepare(
+            "SELECT c.Size " +
+            "FROM ContentManifestEntry cme " +
+            "INNER JOIN Content c on c.Id = cme.ContentId " +
+            "WHERE cme.VersionId = @VersionId AND cme.ManifestIdx = @ManifestIdx");
+
+        stmt.BindInt64(1, versionId); // @VersionId
+
+        long total = 0;
+        for (var offset = 0; offset < requestedIndices.Length; offset += 4)
+        {
+            stmt.BindInt(2, BinaryPrimitives.ReadInt32LittleEndian(requestedIndices.Slice(offset, 4).Span));
+
+            if (stmt.Step() != raw.SQLITE_ROW)
+                return null;
+
+            total += stmt.ColumnInt(0);
+            stmt.Reset();
+        }
+
+        return total;
     }
 
     // TODO: Crappy Accept-Encoding parser
