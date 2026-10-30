@@ -97,7 +97,7 @@ public sealed class ForkManifestControllerTests(
         Assert.Matches("^[0-9A-F]{64}$", linuxHash.GetString());
 
         Assert.True(linux.TryGetProperty("size", out var linuxSize));
-        Assert.Equal(535, linuxSize.GetInt64());
+        Assert.Equal(588, linuxSize.GetInt64());
 
         Assert.True(srv.TryGetProperty("win-x64", out var win));
         Assert.True(win.TryGetProperty("url", out var winUrl));
@@ -108,7 +108,7 @@ public sealed class ForkManifestControllerTests(
         Assert.Matches("^[0-9A-F]{64}$", winHash.GetString());
 
         Assert.True(win.TryGetProperty("size", out var winSize));
-        Assert.Equal(533, winSize.GetInt64());
+        Assert.Equal(586, winSize.GetInt64());
     }
 
     [Fact]
