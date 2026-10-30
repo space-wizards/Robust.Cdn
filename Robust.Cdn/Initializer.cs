@@ -12,11 +12,12 @@ public static class Initializer
         using var initScope = sp.CreateScope();
         var services = initScope.ServiceProvider;
         var logFactory = services.GetRequiredService<ILoggerFactory>();
-        var loggerStartup = logFactory.CreateLogger("Robust.Cdn.Program");
-        var manifestOptions = services.GetRequiredService<IOptions<ManifestOptions>>().Value;
         var db = services.GetRequiredService<Database>();
         var manifestDb = services.GetRequiredService<ManifestDatabase>();
+        var manifestOptions = services.GetRequiredService<IOptions<ManifestOptions>>().Value;
 
+        // validate configuration
+        var loggerStartup = logFactory.CreateLogger("Robust.Cdn.Program");
         if (string.IsNullOrEmpty(manifestOptions.FileDiskPath))
         {
             loggerStartup.LogCritical("Manifest.FileDiskPath not set in configuration!");
@@ -29,6 +30,7 @@ public static class Initializer
             return false;
         }
 
+        // do migrations
         loggerStartup.LogDebug("Running migrations!");
         var loggerMigrator = logFactory.CreateLogger<Migrator>();
 
@@ -39,10 +41,12 @@ public static class Initializer
 
         loggerStartup.LogDebug("Done running migrations!");
 
+        // fill forks in manifest DB from options
         loggerStartup.LogDebug("Ensuring forks created in manifest DB");
         manifestDb.EnsureForksCreated();
         loggerStartup.LogDebug("Done creating forks in manifest DB!");
 
+        // start up ingest job in case some was left unfinished upon shutdown
         var scheduler = await initScope.ServiceProvider.GetRequiredService<ISchedulerFactory>().GetScheduler();
         foreach (var fork in manifestOptions.Forks.Keys)
         {
