@@ -15,14 +15,14 @@
     {
         return rid switch
         {
-            "win-x64" => "Windows x64",
-            "win-arm64" => "Windows ARM64",
-            "linux-x64" => "Linux x64",
-            "linux-arm64" => "Linux ARM64",
+            "win-x64" => "Windows x64 (Intel, AMD)",
+            "win-arm64" => "Windows ARM64 (Snapdragon, etc)",
+            "linux-x64" => "Linux x64 (Intel, AMD)",
+            "linux-arm64" => "Linux ARM64 (Snapdragon, etc)",
             "osx-x64" => "macOS x64 (Intel)",
             "osx-arm64" => "macOS ARM64 (Apple Silicon)",
-            "freebsd-x64" => "FreeBSD x64",
-            "freebsd-arm64" => "FreeBSD ARM64",
+            "freebsd-x64" => "FreeBSD x64 (Intel, AMD)",
+            "freebsd-arm64" => "FreeBSD ARM64 (Snapdragon, etc)",
             _ => rid
         };
     }
