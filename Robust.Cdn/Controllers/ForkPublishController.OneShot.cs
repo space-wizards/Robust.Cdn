@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using Microsoft.AspNetCore.Mvc;
 using Robust.Cdn.Helpers;
 
@@ -51,7 +51,12 @@ public sealed partial class ForkPublishController
 
         var versionDir = buildDirectoryManager.GetBuildVersionPath(fork, request.Version);
 
-        var metadata = new VersionMetadata { Version = request.Version, EngineVersion = request.EngineVersion };
+        var metadata = new VersionMetadata(
+            request.Version,
+            request.EngineVersion,
+            new(request.SourceUrl, request.SourceCommitId, request.SourceBranchName),
+            new(request.EngineSourceUrl, request.EngineSourceCommitId, request.EngineSourceBranchName)
+        );
 
         try
         {

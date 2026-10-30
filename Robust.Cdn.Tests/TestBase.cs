@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.AspNetCore.Mvc.Testing;
 using SharpZstd;
 using System.IO.Compression;
@@ -44,7 +45,7 @@ public abstract class TestBase : IClassFixture<DatabaseFixture>
             builder.ConfigureLogging(logging =>
             {
                 logging.AddProvider(new XUnitLoggerProvider(testOutput));
-            });
+        });
         });
     }
 

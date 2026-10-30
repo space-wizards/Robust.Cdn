@@ -46,15 +46,21 @@ public sealed partial class ForkPublishController
         }
 
         await dbCon.ExecuteAsync("""
-            INSERT INTO PublishInProgress (Version, ForkId, StartTime, EngineVersion)
-            VALUES (@Version, @ForkId, @StartTime, @EngineVersion)
+            INSERT INTO PublishInProgress (Version, ForkId, StartTime, EngineVersion, SourceUrl, SourceCommitId, SourceBranchName, EngineSourceUrl, EngineSourceCommitId, EngineSourceBranchName)
+            VALUES (@Version, @ForkId, @StartTime, @EngineVersion, @SourceUrl, @SourceCommitId, @SourceBranchName, @EngineSourceUrl, @EngineSourceCommitId, @EngineSourceBranchName)
             """,
             new
             {
                 request.Version,
                 request.EngineVersion,
                 ForkId = forkId,
-                StartTime = DateTime.UtcNow
+                StartTime = DateTime.UtcNow,
+                request.SourceUrl,
+                request.SourceCommitId,
+                request.SourceBranchName,
+                request.EngineSourceUrl,
+                request.EngineSourceCommitId,
+                request.EngineSourceBranchName,
             });
 
         var versionDir = buildDirectoryManager.GetBuildVersionPath(fork, request.Version);
@@ -127,8 +133,9 @@ public sealed partial class ForkPublishController
         await using var tx = await dbCon.BeginTransactionAsync(cancel);
 
         var forkId = dbCon.QuerySingle<int>("SELECT Id FROM Fork WHERE Name = @Name", new { Name = fork });
-        var versionMetadata = dbCon.QuerySingleOrDefault<VersionMetadata>("""
-            SELECT Version, EngineVersion
+        var versionMetadata = dbCon.QuerySingleOrDefault<VersionMetadata>(
+            """
+            SELECT Version, EngineVersion, SourceUrl, SourceCommitId, SourceBranchName, EngineSourceUrl, EngineSourceCommitId, EngineSourceBranchName 
             FROM PublishInProgress
             WHERE Version = @Name AND ForkId = @Fork
             """,
@@ -175,11 +182,10 @@ public sealed partial class ForkPublishController
         return NoContent();
     }
 
-    public sealed class PublishMultiRequest
-    {
-        public required string Version { get; set; }
-        public required string EngineVersion { get; set; }
-    }
+    /// <summary>
+    /// Request for start of multi-step publishing process of a new version.
+    /// </summary>
+    public sealed class PublishMultiRequest : PublishStartRequestBase;
 
     public sealed class PublishFinishRequest
     {
