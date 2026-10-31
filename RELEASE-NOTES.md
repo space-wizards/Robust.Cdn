@@ -2,6 +2,8 @@
 
 ## Master
 
+* Download responses now include an `X-Robust-Download-Total-Size` header with the total uncompressed size of the requested files, so launchers can show download progress in bytes.
+
 ## 2.2.0
 
 * Added new multi-request publishing workflow.
