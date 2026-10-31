@@ -1,4 +1,4 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using System.Collections;
 using System.Diagnostics;
 using Dapper;
@@ -94,7 +94,9 @@ public sealed class DownloadController(
         var protocol = 1;
 
         // TODO: this request limiting logic is pretty bad.
-        HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = MaxDownloadRequestSize;
+        var maxRequestBodySize = HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (maxRequestBodySize != null)
+            maxRequestBodySize.MaxRequestBodySize = MaxDownloadRequestSize;
 
         var con = db.Connection;
         con.BeginTransaction(deferred: true);
