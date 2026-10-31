@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Dapper;
 using Quartz;
@@ -9,11 +9,12 @@ namespace Robust.Cdn.Jobs;
 /// <summary>
 /// Updates the cached server manifest for a fork.
 /// </summary>
+[DisallowConcurrentExecution]
 public sealed class UpdateForkManifestJob(
     ManifestDatabase database,
     BaseUrlManager baseUrlManager,
     ISchedulerFactory schedulerFactory,
-    ILogger<MakeNewManifestVersionsAvailableJob> logger) : IJob
+    ILogger<UpdateForkManifestJob> logger) : IJob
 {
     private static readonly JsonSerializerOptions ManifestCacheContext = new()
     {
@@ -36,13 +37,18 @@ public sealed class UpdateForkManifestJob(
         var fork = context.MergedJobDataMap.GetString(KeyForkName) ?? throw new InvalidDataException();
         var notifyUpdate = context.MergedJobDataMap.GetBooleanValue(KeyNotifyUpdate);
 
-        var forkId = database.Connection.QuerySingle<int>(
-            "SELECT Id FROM Fork WHERE Name = @ForkName",
-            new { ForkName = fork });
+        using (var tx = database.Connection.BeginTransaction(deferred: false))
+        {
+            var forkId = database.Connection.QuerySingle<int>(
+                "SELECT Id FROM Fork WHERE Name = @ForkName",
+                new { ForkName = fork });
 
-        logger.LogInformation("Updating manifest cache for fork {Fork}", fork);
+            logger.LogInformation("Updating manifest cache for fork {Fork}", fork);
 
-        UpdateServerManifestCache(fork, forkId);
+            UpdateServerManifestCache(fork, forkId);
+
+            tx.Commit();
+        }
 
         if (notifyUpdate)
             await QueueNotifyWatchdogUpdate(fork);

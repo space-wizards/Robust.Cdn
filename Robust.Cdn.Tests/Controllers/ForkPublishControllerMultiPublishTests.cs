@@ -333,6 +333,61 @@ public sealed class ForkPublishControllerMultiPublishTests(
     }
 
     [Fact]
+    public async Task MultiPublish_IngestWhilePublishInProgress_StillPublishesVersion()
+    {
+        var client = Factory.CreateClient();
+
+        const string version = "104.0.0";
+
+        // Start
+        var startRequest = new HttpRequestMessage(HttpMethod.Post, $"/fork/{MultiForkSuccesses}/publish/start")
+        {
+            Content = JsonContent.Create(new { Version = version, EngineVersion = "0.1.2" })
+        };
+        startRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+
+        var startResponse = await client.SendAsync(startRequest);
+        Assert.Equal(HttpStatusCode.NoContent, startResponse.StatusCode);
+
+        // Upload only the client zip
+        await UploadMultiPublishFile(client, version, "test.zip", MultiForkSuccesses, CreateClientZip("ingest during publish"));
+
+        // Force a content ingest run while the publish is still in progress
+        var updateRequest = new HttpRequestMessage(HttpMethod.Post, $"/fork/{MultiForkSuccesses}/control/update");
+        updateRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+
+        var updateResponse = await client.SendAsync(updateRequest);
+        Assert.Equal(HttpStatusCode.Accepted, updateResponse.StatusCode);
+
+        // Content of an in-progress publish must not be ingested before the publish is finished.
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => PollUntilOk(() => client.GetAsync($"/fork/{MultiForkSuccesses}/version/{version}/manifest"))
+        );
+
+        // Finish the publish
+        await UploadMultiPublishFile(client, version, "SS14.Server_win-x64.zip", MultiForkSuccesses, CreateServerZip("win"));
+
+        var finishRequest = new HttpRequestMessage(HttpMethod.Post, $"/fork/{MultiForkSuccesses}/publish/finish")
+        {
+            Content = JsonContent.Create(new { Version = version })
+        };
+        finishRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+
+        var finishResponse = await client.SendAsync(finishRequest);
+        Assert.Equal(HttpStatusCode.NoContent, finishResponse.StatusCode);
+
+        using var manifest = await PollUntilCondition(
+            () => client.GetAsync($"/fork/{MultiForkSuccesses}/manifest"),
+            async r => r.StatusCode == HttpStatusCode.OK && (await r.Content.ReadAsStringAsync()).Contains(version)
+        );
+
+        // The client file must be downloadable too!
+        using var fileResponse = await client.GetAsync($"/fork/{MultiForkSuccesses}/version/{version}/file/test.zip");
+        Assert.Equal(HttpStatusCode.OK, fileResponse.StatusCode);
+        Assert.Equal("ingest during publish", await ReadFileContent(fileResponse));
+    }
+
+    [Fact]
     public async Task MultiPublishFinish_NoClientZip_ReturnsUnprocessableEntity()
     {
         var client = Factory.CreateClient();
