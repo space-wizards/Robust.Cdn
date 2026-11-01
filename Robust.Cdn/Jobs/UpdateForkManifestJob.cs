@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Dapper;
@@ -34,40 +35,47 @@ public sealed class UpdateForkManifestJob(
 
     public async Task Execute(IJobExecutionContext context)
     {
+        var ct = context.CancellationToken;
+
         var fork = context.MergedJobDataMap.GetString(KeyForkName) ?? throw new InvalidDataException();
         var notifyUpdate = context.MergedJobDataMap.GetBooleanValue(KeyNotifyUpdate);
 
-        using (var tx = database.Connection.BeginTransaction(deferred: false))
+        await using (var tx = await database.Connection.BeginTransactionAsync(ct))
         {
             var forkId = database.Connection.QuerySingle<int>(
                 "SELECT Id FROM Fork WHERE Name = @ForkName",
-                new { ForkName = fork });
+                new { ForkName = fork },
+                tx
+            );
 
             logger.LogInformation("Updating manifest cache for fork {Fork}", fork);
 
-            UpdateServerManifestCache(fork, forkId);
+            UpdateServerManifestCache(fork, forkId, tx);
 
-            tx.Commit();
+            await tx.CommitAsync(ct);
         }
 
         if (notifyUpdate)
             await QueueNotifyWatchdogUpdate(fork);
     }
 
-    private void UpdateServerManifestCache(string fork, int forkId)
+    private void UpdateServerManifestCache(string fork, int forkId, IDbTransaction? tx = null)
     {
-        var data = CollectManifestData(fork, forkId);
+        var data = CollectManifestData(fork, forkId, tx);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(data, ManifestCacheContext);
 
-        database.Connection.Execute("UPDATE Fork SET ServerManifestCache = @Data WHERE Id = @ForkId",
+        database.Connection.Execute(
+            "UPDATE Fork SET ServerManifestCache = @Data WHERE Id = @ForkId",
             new
             {
                 Data = bytes,
                 ForkId = forkId
-            });
+            },
+            tx
+        );
     }
 
-    private ManifestData CollectManifestData(string fork, int forkId)
+    private ManifestData CollectManifestData(string fork, int forkId, IDbTransaction? tx = null)
     {
         var data = new ManifestData { Builds = new Dictionary<string, ManifestBuildData>() };
 
@@ -78,7 +86,9 @@ public sealed class UpdateForkManifestJob(
                 FROM ForkVersion
                 WHERE Available AND ForkId = @ForkId
                 """,
-                new { ForkId = forkId });
+                new { ForkId = forkId },
+                tx
+            );
 
         foreach (var version in versions)
         {
@@ -98,7 +108,9 @@ public sealed class UpdateForkManifestJob(
                 SELECT Platform, FileName, Sha256, FileSize
                 FROM ForkVersionServerBuild
                 WHERE ForkVersionId = @ForkVersionId
-                """, new { ForkVersionId = version.id });
+                """, new { ForkVersionId = version.id },
+                tx
+            );
 
             foreach (var (platform, fileName, sha256, size) in servers)
             {
