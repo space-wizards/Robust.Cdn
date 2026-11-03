@@ -1,4 +1,4 @@
-﻿using Dapper;
+using Dapper;
 using Microsoft.Extensions.Options;
 using Quartz;
 using Robust.Cdn.Config;
@@ -42,7 +42,8 @@ public sealed class DeleteInProgressPublishesJob(
 
         foreach (var (_, name, forkName, startTime) in inProgress)
         {
-            if (startTime >= deleteBefore)
+            var utcStartTime = DateTime.SpecifyKind(startTime, DateTimeKind.Utc);
+            if (utcStartTime >= deleteBefore)
                 continue;
 
             logger.LogInformation("Deleting timed out publish for fork {Fork} version {Version}", forkName, name);

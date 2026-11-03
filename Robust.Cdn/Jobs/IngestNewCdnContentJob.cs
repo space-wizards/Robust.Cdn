@@ -1,4 +1,4 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.IO.Compression;
 using System.Text;
 using Dapper;
@@ -16,6 +16,7 @@ namespace Robust.Cdn.Jobs;
 [DisallowConcurrentExecution]
 public sealed class IngestNewCdnContentJob(
     Database cdnDatabase,
+    ManifestDatabase manifestDatabase,
     IOptions<CdnOptions> cdnOptions,
     IOptions<ManifestOptions> manifestOptions,
     ISchedulerFactory schedulerFactory,
@@ -44,7 +45,8 @@ public sealed class IngestNewCdnContentJob(
         List<string> newVersions;
         try
         {
-            newVersions = FindNewVersions(fork, connection);
+            var inProgressPublishes = GetInProgressPublishVersions(fork);
+            newVersions = FindNewVersions(fork, connection, inProgressPublishes);
 
             if (newVersions.Count == 0)
                 return;
@@ -333,7 +335,11 @@ public sealed class IngestNewCdnContentJob(
         }
     }
 
-    private List<string> FindNewVersions(string fork, SqliteConnection con)
+    private List<string> FindNewVersions(
+        string fork,
+        SqliteConnection con,
+        HashSet<string> inProgressPublishes
+    )
     {
         using var stmtCheckVersion = con.Handle!.Prepare("SELECT 1 FROM ContentVersion WHERE Version = ?");
 
@@ -350,6 +356,17 @@ public sealed class IngestNewCdnContentJob(
 
             logger.LogTrace("Found version directory: {VersionDir}, write time: {WriteTime}", versionDirectory,
                 createdTime);
+
+            if (inProgressPublishes.Contains(version))
+            {
+                // The version directory is only completely filled in once the publish is finished
+                logger.LogDebug(
+                    "Skipping version {Version} for fork {Fork}: publish is not finished properly",
+                    version,
+                    fork
+                );
+                continue;
+            }
 
             stmtCheckVersion.Reset();
             stmtCheckVersion.BindString(1, version);
@@ -374,6 +391,19 @@ public sealed class IngestNewCdnContentJob(
         }
 
         return newVersions.OrderByDescending(x => x.Item2).Select(x => x.Item1).ToList();
+    }
+
+    private HashSet<string> GetInProgressPublishVersions(string fork)
+    {
+        return manifestDatabase.Connection
+            .Query<string>("""
+                SELECT pip.Version
+                FROM PublishInProgress pip
+                INNER JOIN Fork f ON f.Id = pip.ForkId
+                WHERE f.Name = @Fork
+                """,
+                new { Fork = fork }
+            ).ToHashSet();
     }
 
     private static int EnsureForkCreated(string fork, SqliteConnection connection)

@@ -7,6 +7,7 @@ indent_size = 4
 indent_style = space
 insert_final_newline = true
 trim_trailing_whitespace = true
+end_of_line = crlf
 
 [*.{csproj,xml,yml,dll.config,msbuildproj,targets,props,json}]
 indent_size = 2
